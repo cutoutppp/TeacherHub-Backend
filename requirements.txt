@@ -5,3 +5,7 @@ pyjwt
 bcrypt
 passlib
 python-multipart
+pdfplumber
+pandas
+openpyxl
+python-docx
