@@ -47,12 +47,7 @@ def login(request: LoginRequest, db = Depends(get_db)):
             detail="Incorrect username or password",
         )
         
-    is_default_pin = (pin == "123456" or pin == "" or (len(idCard) >= 6 and pin == idCard[-6:]))
-    if is_default_pin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="FIRST_TIME_LOGIN"
-        )
+
     
     # Create token payload
     teacher_data = {
