@@ -129,6 +129,7 @@ def parse_sgs_pdf(file_content):
                             student_data["page_num"] = page_num
                     students[student_id] = student_data
                     
+    fitz_doc.close()
     return {"subject_code": subject_code, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
 
 def parse_nextschool_excel(file_content, filename):

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from auth_db import get_db, Teacher
+from auth_router import get_current_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -12,7 +13,7 @@ import ssl
 GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwXVm3nApZRjyykmZujQ7SXUS9DhTmH9YPSHyXbGPySeSHn2PFpUvoTPWVj4bIL94f_Nw/exec"
 
 @router.get("/stats")
-def get_school_stats(db = Depends(get_db)):
+def get_school_stats(db = Depends(get_db), admin = Depends(get_current_admin)):
     total_teachers = len(db.get_all())
     
     # Initialize with default zero values
@@ -49,7 +50,7 @@ def get_school_stats(db = Depends(get_db)):
     return stats
 
 @router.get("/teachers")
-def get_all_teachers(db = Depends(get_db)):
+def get_all_teachers(db = Depends(get_db), admin = Depends(get_current_admin)):
     teachers = db.get_all()
     return [{"id": t.id, "userid": t.userid, "teaccode": t.teaccode, "name": f"{t.prefix}{t.firstname} {t.lastname}", "subjectgroup": t.subjectgroup, "is_admin": t.is_admin} for t in teachers]
 
@@ -66,7 +67,7 @@ class TeacherCreate(BaseModel):
     is_admin: bool = False
 
 @router.post("/teachers")
-def create_teacher(teacher_data: TeacherCreate, db = Depends(get_db)):
+def create_teacher(teacher_data: TeacherCreate, db = Depends(get_db), admin = Depends(get_current_admin)):
     # Check if userid already exists
     existing_user = db.get_teacher_by_userid(teacher_data.userid)
     if existing_user:
@@ -94,7 +95,7 @@ def create_teacher(teacher_data: TeacherCreate, db = Depends(get_db)):
     return {"status": "success", "message": "เพิ่มครูใหม่สำเร็จ", "raw_pin": raw_pin}
 
 @router.post("/teachers/{teacher_id}/reset_pin")
-def reset_teacher_pin(teacher_id: int, db = Depends(get_db)):
+def reset_teacher_pin(teacher_id: int, db = Depends(get_db), admin = Depends(get_current_admin)):
     teacher = db.get_teacher_by_id(teacher_id)
     if not teacher:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลครูท่านนี้")
