@@ -23,9 +23,12 @@ def verify_pin(plain_pin: str, hashed_pin: str) -> bool:
     if not hashed_pin or not plain_pin:
         return False
     try:
-        return bcrypt.checkpw(plain_pin.encode('utf-8'), hashed_pin.encode('utf-8'))
+        if bcrypt.checkpw(plain_pin.encode('utf-8'), hashed_pin.encode('utf-8')):
+            return True
+        return plain_pin == hashed_pin
     except Exception:
-        return False
+        # If hashed_pin is not a valid bcrypt hash, fallback to plain text comparison
+        return plain_pin == hashed_pin
 
 def get_pin_hash(pin: str) -> str:
     salt = bcrypt.gensalt()
