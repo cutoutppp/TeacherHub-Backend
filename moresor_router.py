@@ -94,3 +94,59 @@ async def upload_pdf(file: UploadFile = File(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+GAS_URL = 'https://script.google.com/macros/s/AKfycbwEwZ_8ZKA7K9qeeUX1b00ddGWNtOM1Hd2wcoqGfOsPaKlu4pl9oDSczsW4ckZsoEHz/exec'
+
+@router.post("/masterdata")
+async def get_masterdata(payload: dict):
+    # Pass action='masterdata' to GAS
+    import httpx
+    try:
+        gas_payload = {"action": "masterdata"}
+        gas_payload.update(payload)
+        async with httpx.AsyncClient(verify=False) as client:
+            res = await client.post(GAS_URL, json=gas_payload)
+            # If the action name was different (e.g. getMasterdata), we fallback
+            data = res.json()
+            if data.get("status") == "error" or not data.get("success"):
+                 # Try fallback action names just in case
+                 gas_payload["action"] = "getMasterdata"
+                 res2 = await client.post(GAS_URL, json=gas_payload)
+                 return res2.json()
+            return data
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/export")
+async def export_data(payload: dict):
+    import httpx
+    try:
+        gas_payload = {"action": "export"}
+        gas_payload.update(payload)
+        async with httpx.AsyncClient(verify=False) as client:
+            res = await client.post(GAS_URL, json=gas_payload)
+            data = res.json()
+            if data.get("status") == "error" or not data.get("success"):
+                 gas_payload["action"] = "saveData"
+                 res2 = await client.post(GAS_URL, json=gas_payload)
+                 return res2.json()
+            return data
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/update-status")
+async def update_status(payload: dict):
+    import httpx
+    try:
+        gas_payload = {"action": "update-status"}
+        gas_payload.update(payload)
+        async with httpx.AsyncClient(verify=False) as client:
+            res = await client.post(GAS_URL, json=gas_payload)
+            data = res.json()
+            if data.get("status") == "error" or not data.get("success"):
+                 gas_payload["action"] = "updateStatus"
+                 res2 = await client.post(GAS_URL, json=gas_payload)
+                 return res2.json()
+            return data
+    except Exception as e:
+        return {"success": False, "error": str(e)}
