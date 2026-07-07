@@ -104,7 +104,7 @@ async def get_masterdata(payload: dict):
         courseCode = payload.get("courseCode")
         classRoom = payload.get("classRoom")
         
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             res = await client.get(f"{GAS_URL}?action=getDashboardData")
             result = res.json()
             
@@ -135,7 +135,7 @@ async def export_data(payload: dict):
     try:
         gas_payload = {"action": "submitReport"}
         gas_payload.update(payload)
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             res = await client.post(GAS_URL, json=gas_payload)
             return res.json()
     except Exception as e:
@@ -147,7 +147,7 @@ async def update_status(payload: dict):
     try:
         gas_payload = {"action": "updateStatus"}
         gas_payload.update(payload)
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             res = await client.post(GAS_URL, json=gas_payload)
             return res.json()
     except Exception as e:
@@ -157,7 +157,7 @@ async def update_status(payload: dict):
 async def get_overview():
     import httpx
     try:
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             res = await client.get(f"{GAS_URL}?action=getAllStudentReports")
             return res.json()
     except Exception as e:
@@ -167,7 +167,7 @@ async def get_overview():
 async def get_dashboard():
     import httpx
     try:
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             res = await client.get(f"{GAS_URL}?action=getDashboardData")
             return res.json()
     except Exception as e:
@@ -177,7 +177,7 @@ async def get_dashboard():
 async def get_config():
     import httpx
     try:
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             res = await client.get(f"{GAS_URL}?action=getConfig")
             return res.json()
     except Exception as e:
