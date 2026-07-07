@@ -99,21 +99,33 @@ GAS_URL = 'https://script.google.com/macros/s/AKfycbwEwZ_8ZKA7K9qeeUX1b00ddGWNtO
 
 @router.post("/masterdata")
 async def get_masterdata(payload: dict):
-    # Pass action='masterdata' to GAS
     import httpx
     try:
-        gas_payload = {"action": "masterdata"}
-        gas_payload.update(payload)
+        courseCode = payload.get("courseCode")
+        classRoom = payload.get("classRoom")
+        
         async with httpx.AsyncClient(verify=False) as client:
-            res = await client.post(GAS_URL, json=gas_payload)
-            # If the action name was different (e.g. getMasterdata), we fallback
-            data = res.json()
-            if data.get("status") == "error" or not data.get("success"):
-                 # Try fallback action names just in case
-                 gas_payload["action"] = "getMasterdata"
-                 res2 = await client.post(GAS_URL, json=gas_payload)
-                 return res2.json()
-            return data
+            res = await client.get(f"{GAS_URL}?action=getDashboardData")
+            result = res.json()
+            
+            if not result.get("success"):
+                return {"success": False, "error": "Failed to fetch dashboard data"}
+            
+            courses = result.get("courses", [])
+            for c in courses:
+                room_str = f"{c.get('ชั้น', '')}/{c.get('กลุ่ม-ห้อง', '')}"
+                if c.get("รหัสวิชา") == courseCode and room_str == classRoom:
+                    credits = float(c.get("หน่วยกิต", 0))
+                    return {
+                        "success": True,
+                        "data": {
+                            "teacherName": f"{c.get('คำนำหน้า', '')}{c.get('ชื่อ', '')} {c.get('นามสกุล', '')}",
+                            "courseName": c.get("วิชา", ""),
+                            "credits": credits,
+                            "totalHours": credits * 40
+                        }
+                    }
+            return {"success": False, "error": "Course not found"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -121,16 +133,11 @@ async def get_masterdata(payload: dict):
 async def export_data(payload: dict):
     import httpx
     try:
-        gas_payload = {"action": "export"}
+        gas_payload = {"action": "submitReport"}
         gas_payload.update(payload)
         async with httpx.AsyncClient(verify=False) as client:
             res = await client.post(GAS_URL, json=gas_payload)
-            data = res.json()
-            if data.get("status") == "error" or not data.get("success"):
-                 gas_payload["action"] = "saveData"
-                 res2 = await client.post(GAS_URL, json=gas_payload)
-                 return res2.json()
-            return data
+            return res.json()
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -138,15 +145,40 @@ async def export_data(payload: dict):
 async def update_status(payload: dict):
     import httpx
     try:
-        gas_payload = {"action": "update-status"}
+        gas_payload = {"action": "updateStatus"}
         gas_payload.update(payload)
         async with httpx.AsyncClient(verify=False) as client:
             res = await client.post(GAS_URL, json=gas_payload)
-            data = res.json()
-            if data.get("status") == "error" or not data.get("success"):
-                 gas_payload["action"] = "updateStatus"
-                 res2 = await client.post(GAS_URL, json=gas_payload)
-                 return res2.json()
-            return data
+            return res.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.get("/overview")
+async def get_overview():
+    import httpx
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            res = await client.get(f"{GAS_URL}?action=getAllStudentReports")
+            return res.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.get("/dashboard")
+async def get_dashboard():
+    import httpx
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            res = await client.get(f"{GAS_URL}?action=getDashboardData")
+            return res.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.get("/config")
+async def get_config():
+    import httpx
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            res = await client.get(f"{GAS_URL}?action=getConfig")
+            return res.json()
     except Exception as e:
         return {"success": False, "error": str(e)}
