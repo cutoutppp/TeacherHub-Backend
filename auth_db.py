@@ -20,14 +20,9 @@ class Teacher(BaseModel):
     is_admin: bool = False
 
 def verify_pin(plain_pin: str, hashed_pin: str) -> bool:
-    if not hashed_pin or not plain_pin:
-        return False
     try:
-        if bcrypt.checkpw(plain_pin.encode('utf-8'), hashed_pin.encode('utf-8')):
-            return True
-        return plain_pin == hashed_pin
+        return bcrypt.checkpw(plain_pin.encode('utf-8'), hashed_pin.encode('utf-8'))
     except Exception:
-        # If hashed_pin is not a valid bcrypt hash, fallback to plain text comparison
         return plain_pin == hashed_pin
 
 def get_pin_hash(pin: str) -> str:

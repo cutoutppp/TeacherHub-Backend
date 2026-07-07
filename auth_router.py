@@ -105,25 +105,3 @@ def verify_token(request: VerifyTokenRequest):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
-security = HTTPBearer()
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db = Depends(get_db)):
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        userid: str = payload.get("sub")
-        if userid is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        teacher = db.get_teacher_by_userid(userid)
-        if teacher is None:
-            raise HTTPException(status_code=401, detail="User not found")
-        return teacher
-    except Exception:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-
-def get_current_admin(current_user: Teacher = Depends(get_current_user)):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    return current_user

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from auth_db import get_db, Teacher
-from auth_router import get_current_user
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import urllib.request
@@ -95,7 +94,7 @@ class DashboardStats(BaseModel):
     sgs_breakdown: List[Dict[str, Any]] = []
 
 @router.get("/stats/{userid}")
-def get_dashboard_stats(userid: str, db = Depends(get_db), current_user: Teacher = Depends(get_current_user)):
+def get_dashboard_stats(userid: str, db = Depends(get_db)):
     teacher = db.get_teacher_by_userid(userid)
     if not teacher:
         return {

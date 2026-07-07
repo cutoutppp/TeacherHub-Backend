@@ -138,7 +138,6 @@ async def compare_pdfs(
                 result_images.append(f"data:image/png;base64,{base64_img}")
                 
             # ส่งกลับไฟล์ต้นฉบับแทนไฟล์ที่ผ่านการวาดกล่องทับ เพื่อป้องกันปัญหาไฟล์เสีย
-            doc.close()
             doc_base64 = base64.b64encode(file_content).decode('utf-8')
             return result_images, doc_base64
 
