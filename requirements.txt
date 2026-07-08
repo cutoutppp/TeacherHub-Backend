@@ -9,5 +9,5 @@ PyMuPDF
 pandas
 openpyxl
 python-docx
-PyMuPDF
+pdfplumber
 httpx
