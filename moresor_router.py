@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-import pdfplumber
+import fitz  # PyMuPDF
 import io
 import re
 
@@ -37,10 +37,32 @@ async def upload_pdf(file: UploadFile = File(...)):
         course_code = ''
         class_room = ''
         
-        with pdfplumber.open(io.BytesIO(content)) as pdf:
-            full_text = ""
-            for page in pdf.pages:
-                full_text += page.extract_text() + "\n"
+        # Use PyMuPDF to extract text
+        doc = fitz.open(stream=content, filetype="pdf")
+        extracted_lines = []
+        for page in doc:
+            words = page.get_text("words")
+            lines_group = []
+            for w in sorted(words, key=lambda x: x[1]):
+                y_center = (w[1] + w[3]) / 2
+                found = False
+                for line in lines_group:
+                    line_top = min(lw[1] for lw in line)
+                    line_bottom = max(lw[3] for lw in line)
+                    if line_top <= y_center <= line_bottom:
+                        line.append(w)
+                        found = True
+                        break
+                if not found:
+                    lines_group.append([w])
+            
+            for line in lines_group:
+                line.sort(key=lambda x: x[0])
+                line_str = " ".join([w[4] for w in line])
+                extracted_lines.append(line_str)
+        doc.close()
+        
+        full_text = "\n".join(extracted_lines)
                 
         clean_text = clean_thai_text(full_text)
         lines = clean_text.split('\n')
