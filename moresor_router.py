@@ -145,7 +145,7 @@ async def export_data(payload: dict):
 async def update_status(payload: dict):
     import httpx
     try:
-        gas_payload = {"action": "updateStatus"}
+        gas_payload = {"action": "updateStudentStatus"}
         gas_payload.update(payload)
         async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             res = await client.post(GAS_URL, json=gas_payload)
