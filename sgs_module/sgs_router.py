@@ -265,9 +265,6 @@ def _get_fallback_demo_rooms(name):
         }
     }]
 
-@app.post("/api/export/wp16/saved")
-async
-
 @router.post("/api/export/wp16/saved")
 async def api_export_wp16_saved(request: Request):
     try:
