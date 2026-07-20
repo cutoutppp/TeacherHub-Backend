@@ -306,6 +306,13 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                     
             # Check NextSchool Subs
             subs = ns.get("subs", {}).get(key, {})
+            # Build sorted sub key list for this period to get sequential unit number
+            period_sub_keys_sorted = sorted(
+                [k for k in ns_max_scores.keys() if k.startswith(f"{key}_sub_")],
+                key=lambda k: int(k.split("_sub_")[-1])
+            )
+            sub_idx_to_unit = {k.split("_sub_")[-1]: (i + 1) for i, k in enumerate(period_sub_keys_sorted)}
+            
             for sub_idx, sub_val_str in subs.items():
                 full_sub = ns_max_scores.get(f"{key}_sub_{sub_idx}")
                 if full_sub:
@@ -314,9 +321,10 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                         if val_sub < (full_sub / 2):
                             period_names = {"before_mid": "ก่อนกลางภาค", "mid": "กลางภาค", "after_mid": "หลังกลางภาค", "final": "ปลายภาค"}
                             thai_key = period_names.get(key, key)
+                            unit_num = sub_idx_to_unit.get(str(sub_idx), sub_idx)
                             results["warnings"].append({
                                 "student_id": sid, "name": name, "type": "Low Score Warning",
-                                "message": f"NextSchool คะแนนย่อย {thai_key} หน่วยที่ {sub_idx} ({val_sub}) ต่ำกว่าครึ่งหนึ่งของ {full_sub}"
+                                "message": f"NextSchool คะแนนย่อย {thai_key} หน่วยที่ {unit_num} ({val_sub}) ต่ำกว่าครึ่งหนึ่งของ {full_sub}"
                             })
                             add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sub_{sub_idx}"), "yellow")
                     except ValueError:
