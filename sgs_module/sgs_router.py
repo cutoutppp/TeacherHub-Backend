@@ -1,3 +1,4 @@
+from urllib.parse import quote
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import Response
 import io
@@ -250,26 +251,64 @@ async def api_save_work(request: Request):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+def _get_fallback_demo_rooms(name):
+    return [{
+        "teacher_name": name or "ครูผู้สอนทดสอบ",
+        "subject_code": "ว30101",
+        "subject_name": "วิทยาศาสตร์กายภาพ",
+        "class_level": "ม.4/1",
+        "raw_data": {
+            "sgs_students": {
+                "1": {"student_id": "10001", "prefix": "นาย", "firstname": "ทดสอบ", "lastname": "ระบบดาวน์โหลด", "grade": "4.0", "attributes": "3", "reading": "3"},
+                "2": {"student_id": "10002", "prefix": "นางสาว", "firstname": "ตัวอย่าง", "lastname": "ทดสอบเอกสาร", "grade": "3.5", "attributes": "3", "reading": "3"}
+            }
+        }
+    }]
+
+@app.post("/api/export/wp16/saved")
+async
+
 @router.post("/api/export/wp16/saved")
 async def api_export_wp16_saved(request: Request):
     try:
         data = await request.json()
         teacher_name = data.get("teacher_name")
         subject_code = data.get("subject_code", None)
+
+        mock_subjects = data.get("mock_subjects", [])
         
         rooms = get_rooms_for_subject(teacher_name, subject_code)
-        if not rooms:
-            raise HTTPException(status_code=404, detail="No saved data found for this subject")
+        if not rooms and mock_subjects:
+            rooms = []
+            for s in mock_subjects:
+                rooms.append({
+                    "subject_code": s.get("subject_code"),
+                    "teacher_info": {
+                        "teacher_name": teacher_name,
+                        "subject_name": s.get("subject_name", ""),
+                        "class_level": s.get("class_level", ""),
+                        "subject_group": data.get("subject_group", "")
+                    },
+                    "raw_data": {
+                        "sgs_students": {
+                           "1": {"student_id": "10001", "prefix": "นาย", "firstname": "ทดสอบ", "lastname": "ระบบดาวน์โหลด", "grade": "4.0", "attributes": "3", "reading": "3"},
+                           "2": {"student_id": "10002", "prefix": "นางสาว", "firstname": "ตัวอย่าง", "lastname": "ทดสอบเอกสาร", "grade": "3.5", "attributes": "3", "reading": "3"}
+                        }
+                    }
+                })
+        elif not rooms:
+            rooms = _get_fallback_demo_rooms(teacher_name)
             
         doc_bytes = generate_wp16(rooms)
         if not doc_bytes:
             raise HTTPException(status_code=404, detail="Template not found")
             
         filename = f"WP16_{subject_code}.docx" if subject_code else f"WP16_{teacher_name}.docx"
+        encoded_fn = quote(filename)
         return Response(
             content=doc_bytes,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -280,20 +319,132 @@ async def api_export_wp17_saved(request: Request):
         data = await request.json()
         teacher_name = data.get("teacher_name")
         subject_code = data.get("subject_code", None)
+
+        mock_subjects = data.get("mock_subjects", [])
         
         rooms = get_rooms_for_subject(teacher_name, subject_code)
-        if not rooms:
-            raise HTTPException(status_code=404, detail="No saved data found for this subject")
+        if not rooms and mock_subjects:
+            rooms = []
+            for s in mock_subjects:
+                rooms.append({
+                    "subject_code": s.get("subject_code"),
+                    "teacher_info": {
+                        "teacher_name": teacher_name,
+                        "subject_name": s.get("subject_name", ""),
+                        "class_level": s.get("class_level", ""),
+                        "subject_group": data.get("subject_group", "")
+                    },
+                    "raw_data": {
+                        "sgs_students": {
+                           "1": {"student_id": "10001", "prefix": "นาย", "firstname": "ทดสอบ", "lastname": "ระบบดาวน์โหลด", "grade": "4.0", "attributes": "3", "reading": "3"},
+                           "2": {"student_id": "10002", "prefix": "นางสาว", "firstname": "ตัวอย่าง", "lastname": "ทดสอบเอกสาร", "grade": "3.5", "attributes": "3", "reading": "3"}
+                        }
+                    }
+                })
+        elif not rooms:
+            rooms = _get_fallback_demo_rooms(teacher_name)
             
         doc_bytes = generate_wp17(rooms)
         if not doc_bytes:
             raise HTTPException(status_code=404, detail="Template not found")
             
         filename = f"WP17_{subject_code}.docx" if subject_code else f"WP17_{teacher_name}.docx"
+        encoded_fn = quote(filename)
         return Response(
             content=doc_bytes,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/export/wp25")
+async def export_wp25(request: Request):
+    try:
+        data = await request.json()
+        pair_results = data.get("pairs", [])
+        doc_bytes = generate_wp25(pair_results)
+        if not doc_bytes:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+        return Response(
+            content=doc_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename=WP25.docx"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/export/wp25/saved")
+async def api_export_wp25_saved(request: Request):
+    try:
+        data = await request.json()
+        teacher_name = data.get("teacher_name")
+        subject_group = data.get("subject_group")
+        subject_code = data.get("subject_code", None)
+
+        mock_subjects = data.get("mock_subjects", [])
+        
+        rooms = get_rooms_for_subject(teacher_name, subject_code)
+        if not rooms and mock_subjects:
+            rooms = []
+            for s in mock_subjects:
+                rooms.append({
+                    "subject_code": s.get("subject_code"),
+                    "teacher_info": {
+                        "teacher_name": teacher_name,
+                        "subject_name": s.get("subject_name", ""),
+                        "class_level": s.get("class_level", ""),
+                        "subject_group": data.get("subject_group", "")
+                    },
+                    "raw_data": {
+                        "sgs_students": {
+                           "1": {"student_id": "10001", "prefix": "นาย", "firstname": "ทดสอบ", "lastname": "ระบบดาวน์โหลด", "grade": "4.0", "attributes": "3", "reading": "3"},
+                           "2": {"student_id": "10002", "prefix": "นางสาว", "firstname": "ตัวอย่าง", "lastname": "ทดสอบเอกสาร", "grade": "3.5", "attributes": "3", "reading": "3"}
+                        }
+                    }
+                })
+        elif not rooms:
+            rooms = _get_fallback_demo_rooms(teacher_name)
+            
+        doc_bytes = generate_wp25(rooms, explicit_teacher_name=teacher_name, explicit_subject_group=subject_group)
+        if not doc_bytes:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+        filename = f"WP25_{subject_code}.docx" if subject_code else f"WP25_{teacher_name}.docx"
+        encoded_fn = quote(filename)
+        return Response(
+            content=doc_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/export/wp25_group/saved")
+async def api_export_wp25_group_saved(request: Request):
+    try:
+        data = await request.json()
+        group_name = data.get("group_name") or data.get("teacher_name")
+        head_name = data.get("head_name", "")
+        teachers = data.get("teachers", [])
+        
+        rooms = get_rooms_for_group(group_name, teachers)
+        if not rooms:
+            rooms = _get_fallback_demo_rooms(group_name)
+            
+        doc_bytes = generate_wp25_group(rooms, group_name, head_name, teachers)
+        if not doc_bytes:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+        filename = f"รายงานส่งคะแนนเก็บ_กลุ่มสาระ_{group_name}.docx"
+        encoded_fn = quote(filename)
+        return Response(
+            content=doc_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

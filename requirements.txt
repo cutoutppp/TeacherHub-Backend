@@ -5,9 +5,8 @@ pyjwt
 bcrypt
 passlib
 python-multipart
-PyMuPDF
+pdfplumber
 pandas
 openpyxl
 python-docx
-pdfplumber
-httpx
+PyMuPDF
