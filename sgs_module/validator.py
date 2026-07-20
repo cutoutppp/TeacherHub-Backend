@@ -294,9 +294,11 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                 try:
                     val_ns = float(val_str_ns)
                     if val_ns < (full_ns_sum / 2):
+                        period_names = {"before_mid": "ก่อนกลางภาค", "mid": "กลางภาค", "after_mid": "หลังกลางภาค", "final": "ปลายภาค"}
+                        thai_key = period_names.get(key, key)
                         results["warnings"].append({
                             "student_id": sid, "name": name, "type": "Low Score Warning",
-                            "message": f"NextSchool ผลรวม {key} ({val_ns}) ต่ำกว่าครึ่งหนึ่งของ {full_ns_sum}"
+                            "message": f"NextSchool ผลรวม {thai_key} ({val_ns}) ต่ำกว่าครึ่งหนึ่งของ {full_ns_sum}"
                         })
                         add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sum"), "yellow")
                 except ValueError:
@@ -314,7 +316,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                             thai_key = period_names.get(key, key)
                             results["warnings"].append({
                                 "student_id": sid, "name": name, "type": "Low Score Warning",
-                                "message": f"NextSchool คะแนนย่อย {thai_key} ช่อง {sub_idx} ({val_sub}) ต่ำกว่าครึ่งหนึ่งของ {full_sub}"
+                                "message": f"NextSchool คะแนนย่อย {thai_key} หน่วยที่ {sub_idx} ({val_sub}) ต่ำกว่าครึ่งหนึ่งของ {full_sub}"
                             })
                             add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sub_{sub_idx}"), "yellow")
                     except ValueError:
