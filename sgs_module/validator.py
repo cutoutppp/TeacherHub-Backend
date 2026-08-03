@@ -146,57 +146,9 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
         sgs_page = sgs.get("page_num", 0)
         ns_page = ns.get("row_idx", ns.get("page_num", 0))
 
-        # 1. Decimal Check (Error)
-        score_keys = ["before_mid", "mid", "after_mid", "final"]
-        if round_type == "midterm":
-            score_keys = ["before_mid", "mid"]
-
-        for key in score_keys:
-            # Check SGS
-            sgs_val = str(sgs.get("scores", {}).get(key, ""))
-            if check_decimal(sgs_val):
-                results["errors"].append({
-                    "student_id": sid, "name": name, "type": "Decimal Error",
-                    "message": f"SGS คะแนน {key} มีทศนิยม ({sgs_val})"
-                })
-                add_highlight("sgs", sgs_page, sgs["bboxes"].get(key), "red")
-                
-            # Check NextSchool Sums
-            ns_val = str(ns.get("sums", {}).get(key, ""))
-            if check_decimal(ns_val):
-                results["errors"].append({
-                    "student_id": sid, "name": name, "type": "Decimal Error",
-                    "message": f"NextSchool ผลรวมคะแนน {key} มีทศนิยม ({ns_val})"
-                })
-                add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sum"), "red")
-                
-            # Check NextSchool Subs
-            subs = ns.get("subs", {}).get(key, {})
-            for sub_idx, sub_val in subs.items():
-                if check_decimal(str(sub_val)):
-                    results["errors"].append({
-                        "student_id": sid, "name": name, "type": "Decimal Error",
-                        "message": f"NextSchool คะแนนย่อยช่องที่ {sub_idx} ({key}) มีทศนิยม ({sub_val})"
-                    })
-                    add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sub_{sub_idx}"), "red")
+        # Decimal Check removed per user request
                     
-        # Check Total Decimal (Only for final)
-        if round_type == "final":
-            sgs_tot = str(sgs.get("total", ""))
-            if check_decimal(sgs_tot):
-                results["errors"].append({
-                    "student_id": sid, "name": name, "type": "Decimal Error",
-                    "message": f"SGS คะแนนรวมมีทศนิยม ({sgs_tot})"
-                })
-                add_highlight("sgs", sgs_page, sgs["bboxes"].get("total"), "red")
-                
-            ns_tot = str(ns.get("total", ""))
-            if check_decimal(ns_tot):
-                results["errors"].append({
-                    "student_id": sid, "name": name, "type": "Decimal Error",
-                    "message": f"NextSchool คะแนนรวมมีทศนิยม ({ns_tot})"
-                })
-                add_highlight("nextschool", ns_page, ns["bboxes"].get("total"), "red")
+
 
         # 2. Consistency Check (Error) on SGS (Only for final)
         if round_type == "final":
@@ -256,16 +208,16 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
             sgs_val_str = sgs.get("scores", {}).get(key, "")
             ns_val_str = ns.get("sums", {}).get(key, "")
             
-            # Allow blank equivalent to 0
-            try:
-                sgs_val = float(str(sgs_val_str).strip()) if str(sgs_val_str).strip() else 0.0
-            except ValueError:
-                sgs_val = 0.0
+            # Allow blank equivalent to 0, extract only integer part
+            import re
+            
+            def extract_int(v_str):
+                v_str = str(v_str).split('.')[0] # Ignore decimals
+                digits = re.sub(r'\D', '', v_str) # Keep only digits
+                return int(digits) if digits else 0
                 
-            try:
-                ns_val = float(str(ns_val_str).strip()) if str(ns_val_str).strip() else 0.0
-            except ValueError:
-                ns_val = 0.0
+            sgs_val = extract_int(sgs_val_str)
+            ns_val = extract_int(ns_val_str)
             
             if abs(sgs_val - ns_val) > 0.01:
                 p_name = period_names.get(key, key)

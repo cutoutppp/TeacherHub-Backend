@@ -53,31 +53,30 @@ def parse_sgs_pdf(file_content):
                     row0 = [clean_text(x) for x in texts[0]]
                     row1 = [clean_text(x) for x in texts[1]]
                     
-                    sections = [
-                        {"key": "before_mid", "keywords": ["ก่อนกลางภาค", "กลอนกลางภาค", "กลอน\nกลางภาค", "ก่อน\nกลางภาค"]},
-                        {"key": "mid", "keywords": ["กลางภาค"]},
-                        {"key": "after_mid", "keywords": ["หลังกลางภาค", "หลพงกลางภาค", "หลพง\nกลางภาค", "หลัง\nกลางภาค"]},
-                        {"key": "final", "keywords": ["ปลายภาค", "ปลาย\nภาค"]},
-                        {"key": "total", "keywords": ["รวม"]},
-                    ]
+                    # Build robust column mapping from standard SGS format
+                    # Headers in PDF often have merged cells which shifts row0 indices.
+                    # Data rows (and max score rows) always follow a strict format:
+                    # 0: ลำดับ, 1: รหัส, 2: ชื่อ, 3: เวลาเรียน/ภาระงาน
+                    is_final = any("หลัง" in str(v) or "หลพง" in str(v) or "ปลาย" in str(v) for v in row0)
                     
-                    for i, sec in enumerate(sections):
-                        col_idx = -1
-                        for j, val in enumerate(row0):
-                            if any(k in val for k in sec["keywords"]):
-                                if sec["key"] == "mid" and ("หลัง" in val or "หลพง" in val or "ก่อน" in val or "กลอน" in val):
-                                    continue
-                                # make sure 'total' doesn't match something else
-                                if sec["key"] == "total" and j < 6:
-                                    continue
-                                col_idx = j
-                                break
-                                
-                        if col_idx != -1:
-                            sgs_mapping[sec["key"]] = col_idx
-                            if col_idx < len(row1) and str(row1[col_idx]).isdigit():
-                                max_scores[sec["key"]] = int(row1[col_idx])
-                            
+                    if is_final:
+                        sgs_mapping = {
+                            "before_mid": 4,
+                            "mid": 5,
+                            "after_mid": 6,
+                            "final": 7,
+                            "total": 8
+                        }
+                    else:
+                        sgs_mapping = {
+                            "before_mid": 4,
+                            "mid": 5,
+                            "total": 6
+                        }
+                        
+                    for key, col_idx in sgs_mapping.items():
+                        if col_idx < len(row1) and str(row1[col_idx]).strip().isdigit():
+                            max_scores[key] = int(str(row1[col_idx]).strip())
                 
                 for row_text, row_bbox in zip(texts, rows_bboxes):
                     row = row_text
