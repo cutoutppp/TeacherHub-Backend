@@ -257,8 +257,15 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
             ns_val_str = ns.get("sums", {}).get(key, "")
             
             # Allow blank equivalent to 0
-            sgs_val = float(sgs_val_str) if sgs_val_str.replace('.', '', 1).isdigit() else 0.0
-            ns_val = float(ns_val_str) if ns_val_str.replace('.', '', 1).isdigit() else 0.0
+            try:
+                sgs_val = float(str(sgs_val_str).strip()) if str(sgs_val_str).strip() else 0.0
+            except ValueError:
+                sgs_val = 0.0
+                
+            try:
+                ns_val = float(str(ns_val_str).strip()) if str(ns_val_str).strip() else 0.0
+            except ValueError:
+                ns_val = 0.0
             
             if abs(sgs_val - ns_val) > 0.01:
                 p_name = period_names.get(key, key)
