@@ -147,7 +147,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
         ns_page = ns.get("row_idx", ns.get("page_num", 0))
 
         # Decimal Check removed per user request
-                    
+        score_keys = ["before_mid", "mid"] if round_type == "midterm" else ["before_mid", "mid", "after_mid", "final"]
 
 
         # 2. Consistency Check (Error) on SGS (Only for final)
