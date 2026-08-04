@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 import fitz  # PyMuPDF
 import io
@@ -73,7 +73,7 @@ async def upload_pdf(file: UploadFile = File(...)):
             course_code = header_match.group(1)
             class_room = header_match.group(2)
             
-        student_regex = re.compile(r'^(\d+)\s+(\d{5})\s+(นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.)\s+(.*?)\s*([✔✘\s]*(?:ลว[✔✘\s]*)*)$')
+        student_regex = re.compile(r'^(\d+)\s+(\d{5})\s+(นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.)\s+(.*?)\s*([✔✘\s]*(?:ล[ก-ฮ][✔✘\s]*)*)$')
         
         inside_summary = False
         for line in lines:
@@ -94,7 +94,7 @@ async def upload_pdf(file: UploadFile = File(...)):
                 
                 present_count = marks_str.count('✔')
                 absent_count = marks_str.count('✘')
-                leave_count = marks_str.count('ลว')
+                leave_count = len(re.findall(r'ล[ก-ฮ]', marks_str))
                 
                 students.append({
                     "no": int(seq),
