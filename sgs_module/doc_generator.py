@@ -31,10 +31,14 @@ def get_mode(scores):
 
 def generate_wp16(pair_results):
     template_path = "วผ16 บันทึกข้อความรายงาน 0 ร มผ.docx"
-    if os.path.exists(template_path):
-        doc = Document(template_path)
-    elif os.path.exists(os.path.join("..", template_path)):
-        doc = Document(os.path.join("..", template_path))
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(base_dir)
+    full_path = os.path.join(root_dir, template_path)
+    if not os.path.exists(full_path):
+        full_path = os.path.join(base_dir, template_path)
+        
+    if os.path.exists(full_path):
+        doc = Document(full_path)
     else:
         doc = Document()
         doc.add_heading('รายงาน 0 ร มผ (วผ.16)', 0)
@@ -55,6 +59,7 @@ def generate_wp16(pair_results):
         ns_students = raw.get("nextschool_students", {})
         results = pair.get("results", {})
         at_risk = results.get("at_risk_students", [])
+        ns_grid = results.get("nextschool_data", {}).get("grid_data", [])
         
         seen_sids = set()
         
@@ -150,10 +155,14 @@ def generate_wp16(pair_results):
 
 def generate_wp17(pair_results):
     template_path = "วผ17 บันทึกข้อความรายงานการจัดกิจกรรมการเรียนการสอน.docx"
-    if os.path.exists(template_path):
-        doc = Document(template_path)
-    elif os.path.exists(os.path.join("..", template_path)):
-        doc = Document(os.path.join("..", template_path))
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(base_dir)
+    full_path = os.path.join(root_dir, template_path)
+    if not os.path.exists(full_path):
+        full_path = os.path.join(base_dir, template_path)
+        
+    if os.path.exists(full_path):
+        doc = Document(full_path)
     else:
         doc = Document()
         doc.add_heading('รายงานการจัดกิจกรรมการเรียนการสอน (วผ.17)', 0)
@@ -324,12 +333,17 @@ def parse_level_room(level_str):
 
 def generate_wp25_group(pair_results, group_name="", head_name="", total_teachers_list=None):
     template_path = "บันทึกข้อความรายงานการส่งคะแนนเก็บ.docx"
-    if not os.path.exists(template_path):
-        template_path = os.path.join("..", template_path)
-    if not os.path.exists(template_path):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(base_dir)
+    full_path = os.path.join(root_dir, template_path)
+    
+    if not os.path.exists(full_path):
+        full_path = os.path.join(base_dir, template_path)
+        
+    if not os.path.exists(full_path):
         return generate_wp25(pair_results)
         
-    doc = Document(template_path)
+    doc = Document(full_path)
     
     if total_teachers_list is None:
         total_teachers_list = []
@@ -452,12 +466,17 @@ def generate_wp25_group(pair_results, group_name="", head_name="", total_teacher
 
 def generate_wp25(pair_results, explicit_teacher_name=None, explicit_subject_group=None):
     template_path = "วผ25 บันทึกข้อความรายงานคะแนนกลางภาค.docx"
-    if not os.path.exists(template_path):
-        template_path = os.path.join("..", template_path)
-    if not os.path.exists(template_path):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(base_dir)
+    full_path = os.path.join(root_dir, template_path)
+    
+    if not os.path.exists(full_path):
+        full_path = os.path.join(base_dir, template_path)
+        
+    if not os.path.exists(full_path):
         return None
         
-    doc = Document(template_path)
+    doc = Document(full_path)
     
     teacher_name = explicit_teacher_name or ""
     subject_group = explicit_subject_group or ""
