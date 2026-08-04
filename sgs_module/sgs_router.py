@@ -6,8 +6,8 @@ import base64
 
 from .parser import parse_sgs_pdf, parse_nextschool_excel
 from .validator import validate_scores
-from .doc_generator import generate_wp16, generate_wp17
-from .work_db import get_works_for_teacher, add_work, get_rooms_for_subject
+from .doc_generator import generate_wp16, generate_wp17, generate_wp25, generate_wp25_group
+from .work_db import get_works_for_teacher, add_work, get_rooms_for_subject, get_rooms_for_group
 from .score_db import load_scores_from_json
 
 router = APIRouter()

@@ -50,3 +50,14 @@ def get_rooms_for_subject(teacher_name, subject_code=None):
         for subj_code, subj_data in teacher_data.items():
             all_rooms.extend([v["data"] for v in subj_data.values()])
         return all_rooms
+
+def get_rooms_for_group(group_name=None, teacher_names=None):
+    db = _load_db()
+    all_rooms = []
+    for t_name, teacher_data in db.items():
+        if teacher_names and t_name not in teacher_names:
+            continue
+        for subj_code, subj_data in teacher_data.items():
+            all_rooms.extend([v["data"] for v in subj_data.values()])
+    return all_rooms
+

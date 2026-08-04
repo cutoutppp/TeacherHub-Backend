@@ -11,14 +11,30 @@ def clean_text(text):
 
 def extract_subject_code(text):
     cleaned = clean_text(text)
-    match = re.search(r'([ก-ฮ]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
+    match = re.search(r'([ก-ฮA-Za-z]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
     if match:
-        return match.group(1).replace(" ", "")
+        code = match.group(1).replace(" ", "")
+        if code.startswith("ข"):
+            code = "I" + code[1:]
+        return code
+    return None
+
+def extract_subject_name(text):
+    cleaned = clean_text(text)
+    # Match something like "ชื่อรายวิชา วิทยาศาสตร์กายภาพ ระดับชั้น"
+    match = re.search(r'ชื่อรายวิชา\s+(.+?)\s+(?:ระดับชั้น|มัธยม|ม\.)', cleaned)
+    if match:
+        return match.group(1).strip()
     return None
 
 def extract_class_level(text):
     cleaned = clean_text(text)
-    # Match "มัธยมศึกษาปีที่ 4/1" or "ม.4/1"
+    # Match "มัธยมศึกษาปีที่ 4/1", "ม.4/1", "มัธยมศึกษาปีที่ 4 ห้อง 1"
+    match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d+)\s*(?:/|ห้อง)\s*(\d+)', cleaned)
+    if match:
+        return "ม." + match.group(1).strip() + "/" + match.group(2).strip()
+    
+    # Fallback to the old one just in case
     match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d\s*/\s*\d+)', cleaned)
     if match:
         return "ม." + match.group(1).replace(" ", "")
@@ -30,6 +46,7 @@ import fitz
 def parse_sgs_pdf(file_content):
     students = {}
     subject_code = None
+    subject_name = None
     class_level = None
     max_scores = {}
     sgs_mapping = {}
@@ -40,6 +57,8 @@ def parse_sgs_pdf(file_content):
             text = page.extract_text()
             if not subject_code:
                 subject_code = extract_subject_code(text)
+            if not subject_name:
+                subject_name = extract_subject_name(text)
             if not class_level:
                 class_level = extract_class_level(text)
                 
@@ -53,30 +72,31 @@ def parse_sgs_pdf(file_content):
                     row0 = [clean_text(x) for x in texts[0]]
                     row1 = [clean_text(x) for x in texts[1]]
                     
-                    # Build robust column mapping from standard SGS format
-                    # Headers in PDF often have merged cells which shifts row0 indices.
-                    # Data rows (and max score rows) always follow a strict format:
-                    # 0: ลำดับ, 1: รหัส, 2: ชื่อ, 3: เวลาเรียน/ภาระงาน
-                    is_final = any("หลัง" in str(v) or "หลพง" in str(v) or "ปลาย" in str(v) for v in row0)
+                    sections = [
+                        {"key": "before_mid", "keywords": ["ก่อนกลางภาค", "กลอนกลางภาค", "กลอน\nกลางภาค", "ก่อน\nกลางภาค"]},
+                        {"key": "mid", "keywords": ["กลางภาค"]},
+                        {"key": "after_mid", "keywords": ["หลังกลางภาค", "หลพงกลางภาค", "หลพง\nกลางภาค", "หลัง\nกลางภาค"]},
+                        {"key": "final", "keywords": ["ปลายภาค", "ปลาย\nภาค"]},
+                        {"key": "total", "keywords": ["รวม"]},
+                    ]
                     
-                    if is_final:
-                        sgs_mapping = {
-                            "before_mid": 4,
-                            "mid": 5,
-                            "after_mid": 6,
-                            "final": 7,
-                            "total": 8
-                        }
-                    else:
-                        sgs_mapping = {
-                            "before_mid": 4,
-                            "mid": 5,
-                            "total": 6
-                        }
-                        
-                    for key, col_idx in sgs_mapping.items():
-                        if col_idx < len(row1) and str(row1[col_idx]).strip().isdigit():
-                            max_scores[key] = int(str(row1[col_idx]).strip())
+                    for i, sec in enumerate(sections):
+                        col_idx = -1
+                        for j, val in enumerate(row0):
+                            if any(k in val for k in sec["keywords"]):
+                                if sec["key"] == "mid" and ("หลัง" in val or "หลพง" in val or "ก่อน" in val or "กลอน" in val):
+                                    continue
+                                # make sure 'total' doesn't match something else
+                                if sec["key"] == "total" and j < 6:
+                                    continue
+                                col_idx = j
+                                break
+                                
+                        if col_idx != -1:
+                            sgs_mapping[sec["key"]] = col_idx
+                            if col_idx < len(row1) and str(row1[col_idx]).isdigit():
+                                max_scores[sec["key"]] = int(row1[col_idx])
+                            
                 
                 for row_text, row_bbox in zip(texts, rows_bboxes):
                     row = row_text
@@ -96,12 +116,7 @@ def parse_sgs_pdf(file_content):
                     
                     char_bboxes = [get_bbox(i) for i in range(11, 19)] if len(row) > 18 else []
                     comp_bboxes = [get_bbox(i) for i in range(22, 27)] if len(row) > 26 else []
-                        
-                    name_bbox = get_bbox(2)
-                    extracted_name = clean_text(row[2])
-                    if name_bbox:
-                        rect = fitz.Rect(name_bbox[0], name_bbox[1]-1, name_bbox[2], name_bbox[3]+1)
-                        extracted_name = fitz_doc[page_num].get_textbox(rect).replace("\n", " ").strip()
+                    extracted_name = clean_text(row[2]).replace("\n", " ")
                         
                     student_data = {
                         "student_id": student_id,
@@ -128,7 +143,8 @@ def parse_sgs_pdf(file_content):
                             student_data["page_num"] = page_num
                     students[student_id] = student_data
                     
-    return {"subject_code": subject_code, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
+    fitz_doc.close()
+    return {"subject_code": subject_code, "subject_name": subject_name, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
 
 def parse_nextschool_excel(file_content, filename):
     try:
@@ -142,9 +158,9 @@ def parse_nextschool_excel(file_content, filename):
         # e.g., 381516-ปพ.5_ส31101_ม.4_11_โรงเรียนพัฒนานิคม.xlsx
         subject_code = None
         class_level = None
-        match = re.search(r'ปพ\.5_([^_]+)_(ม\.\d+_\d+)_', filename)
+        match = re.search(r'_([ก-ฮA-Za-z0-9]+)_(ม\.\d+_\d+)_', filename)
         if match:
-            subject_code = match.group(1).strip()
+            subject_code = match.group(1)
             class_level = match.group(2).replace("_", "/")
             
         students = {}
@@ -155,8 +171,10 @@ def parse_nextschool_excel(file_content, filename):
         # Columns start at index 4
         
         cols = df.columns.tolist()
-        row0 = df.iloc[0].tolist()
-        row1 = df.iloc[1].tolist()
+        row0 = df.iloc[0].tolist() if len(df) > 0 else []
+        row1 = df.iloc[1].tolist() if len(df) > 1 else []
+        row2 = df.iloc[2].tolist() if len(df) > 2 else []
+        row3 = df.iloc[3].tolist() if len(df) > 3 else []
         
         # We need mapping for visual rendering on the frontend
         # The frontend HTML table will be structured exactly like the excel grid
@@ -166,6 +184,8 @@ def parse_nextschool_excel(file_content, filename):
             "cols": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in cols],
             "row0": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in row0],
             "row1": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in row1],
+            "row2": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in row2],
+            "row3": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in row3],
             "data_rows": []
         }
         
