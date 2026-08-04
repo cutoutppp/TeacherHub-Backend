@@ -108,6 +108,12 @@ async def upload_pdf(file: UploadFile = File(...)):
                     "totalAttended": present_count + leave_count
                 })
                 
+        if len(students) > 0 and all(s['present'] == 0 for s in students):
+            return {
+                "success": False,
+                "error": "ไม่สามารถบันทึกได้ เนื่องจากแบบฟอร์มนี้ยังไม่ได้เช็คชื่อ (นักเรียนได้ ✘ ทุกคน)"
+            }
+                
         return {
             "success": True,
             "students": students,
@@ -142,7 +148,8 @@ async def get_masterdata(payload: dict):
                             "teacherName": f"{c.get('คำนำหน้า', '')}{c.get('ชื่อ', '')} {c.get('นามสกุล', '')}".strip(),
                             "courseName": c.get("วิชา", ""),
                             "credits": credits,
-                            "totalHours": int(credits * 40)
+                            "totalHours": int(credits * 40),
+                            "subjectGroup": c.get("กลุ่มสาระ", c.get("กลุ่มสาระการเรียนรู้", "อื่นๆ"))
                         }
                     }
             return {"success": False, "error": "Course not found in View_ClassTeacher"}
@@ -156,6 +163,33 @@ async def export_data(payload: dict):
         gas_payload = {"action": "submitReport"}
         gas_payload.update(payload)
         async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            res = await client.post(GAS_URL, json=gas_payload)
+            return res.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+class UploadDriveRequest(BaseModel):
+    fileBase64: str
+    fileName: str
+    courseCode: str
+    classRoom: str
+    teacherName: str
+    subjectGroup: str
+
+@router.post("/upload-pdf-drive")
+async def upload_pdf_drive(req: UploadDriveRequest):
+    import httpx
+    try:
+        gas_payload = {
+            "action": "uploadPDFToDrive",
+            "fileBase64": req.fileBase64,
+            "fileName": req.fileName,
+            "courseCode": req.courseCode,
+            "classRoom": req.classRoom,
+            "teacherName": req.teacherName,
+            "subjectGroup": req.subjectGroup
+        }
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=60.0) as client:
             res = await client.post(GAS_URL, json=gas_payload)
             return res.json()
     except Exception as e:
