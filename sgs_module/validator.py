@@ -59,7 +59,9 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                 results["nextschool_highlights"].append({"page": page, "bbox": bbox_dict, "color": color})
 
     # 0. Master Score Structure Check (NextSchool Only)
-    expected_scores = get_expected_scores(nextschool_data.get("subject_code"))
+    # Use SGS subject code as priority since it usually matches the official master code
+    search_code = sgs_data.get("subject_code") or nextschool_data.get("subject_code")
+    expected_scores = get_expected_scores(search_code)
     if expected_scores:
         keys_to_check = [("before_mid", "ก่อนกลางภาค"), ("mid", "กลางภาค")] if round_type == "midterm" else [("before_mid", "ก่อนกลางภาค"), ("mid", "กลางภาค"), ("after_mid", "หลังกลางภาค"), ("final", "ปลายภาค")]
         

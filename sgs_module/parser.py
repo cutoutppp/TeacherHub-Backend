@@ -142,9 +142,9 @@ def parse_nextschool_excel(file_content, filename):
         # e.g., 381516-ปพ.5_ส31101_ม.4_11_โรงเรียนพัฒนานิคม.xlsx
         subject_code = None
         class_level = None
-        match = re.search(r'_([ก-ฮA-Za-z0-9]+)_(ม\.\d+_\d+)_', filename)
+        match = re.search(r'ปพ\.5_([^_]+)_(ม\.\d+_\d+)_', filename)
         if match:
-            subject_code = match.group(1)
+            subject_code = match.group(1).strip()
             class_level = match.group(2).replace("_", "/")
             
         students = {}
