@@ -68,10 +68,10 @@ async def upload_pdf(file: UploadFile = File(...)):
         clean_text = clean_thai_text(full_text)
         lines = clean_text.split('\n')
         
-        header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(ม\.\d+/\d+)', clean_text)
+        header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(ม\.\d+(?:/\d+)?)', clean_text)
         if not header_match:
-            # Fallback: try without ม. prefix (e.g. "5/1")
-            header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(\d+/\d+)', clean_text)
+            # Fallback: try without ม. prefix (e.g. "5/1" or just "5")
+            header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(\d+(?:/\d+)?)', clean_text)
         if header_match:
             course_code = header_match.group(1)
             class_room = header_match.group(2)
@@ -185,6 +185,8 @@ async def get_masterdata(payload: dict):
                         "data": {
                             "teacherName": f"{c.get('คำนำหน้า', '')}{c.get('ชื่อ', '')} {c.get('นามสกุล', '')}".strip(),
                             "courseName": c.get("วิชา", ""),
+                            "courseCode": master_code if master_code else master_name,
+                            "classRoom": f"{master_level}/{master_room}" if master_room else master_level,
                             "credits": credits,
                             "totalHours": int(credits * 40),
                             "subjectGroup": c.get("กลุ่มสาระ", c.get("กลุ่มสาระการเรียนรู้", "อื่นๆ"))
