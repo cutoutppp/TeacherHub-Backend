@@ -68,12 +68,15 @@ async def upload_pdf(file: UploadFile = File(...)):
         clean_text = clean_thai_text(full_text)
         lines = clean_text.split('\n')
         
-        header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9]+)\s*:\s*(ม\.\d+/\d+)', clean_text)
+        header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(ม\.\d+/\d+)', clean_text)
+        if not header_match:
+            # Fallback: try without ม. prefix (e.g. "5/1")
+            header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(\d+/\d+)', clean_text)
         if header_match:
             course_code = header_match.group(1)
             class_room = header_match.group(2)
             
-        student_regex = re.compile(r'^(\d+)\s+(\d{5})\s+(นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.)\s+(.*?)\s*([✔✘\s]*(?:ล[ก-ฮ][✔✘\s]*)*)$')
+        student_regex = re.compile(r'^(\d+)\s+(\d{5,6})\s+(นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.)\s+(.*?)\s*([✔✘\s]*(?:ล[ก-ฮ][✔✘\s]*)*)$')
         
         inside_summary = False
         for line in lines:
@@ -138,22 +141,43 @@ async def get_masterdata(payload: dict):
                 return {"success": False, "error": "Failed to fetch dashboard data"}
                 
             courses = result.get("courses", [])
+
+            def normalize_level(s):
+                """Remove ม. prefix and strip whitespace for comparison"""
+                return str(s).replace('ม.', '').strip()
+
+            # Normalize incoming classRoom from PDF (e.g. "ม.5/1" → "5/1")
+            norm_class_room = normalize_level(classRoom)
+            # Split into level and room parts for flexible matching
+            cr_parts = norm_class_room.split('/')
+            cr_level = cr_parts[0] if len(cr_parts) > 0 else norm_class_room
+            cr_room = cr_parts[1] if len(cr_parts) > 1 else ''
+
             for c in courses:
-                master_room_str = f"{c.get('ชั้น', '')}/{c.get('กลุ่ม-ห้อง', '')}"
-                master_class = c.get('ชั้น', '')
                 master_code = str(c.get('รหัสวิชา', '')).strip()
                 master_name = str(c.get('วิชา', '')).strip()
-                
-                room_match = (master_room_str == classRoom) or (classRoom.startswith(master_room_str)) or (classRoom.startswith(master_class))
-                
+                master_level = normalize_level(c.get('ชั้น', ''))
+                master_room = str(c.get('กลุ่ม-ห้อง', '')).strip()
+
+                # Room match: compare normalized level and room number
+                level_match = (master_level == cr_level)
+                room_match_num = (master_room == cr_room) if cr_room else True
+                room_match = level_match and room_match_num
+
+                # Fallback: also allow if classRoom starts with master full room string
+                if not room_match:
+                    master_room_str = f"{master_level}/{master_room}"
+                    room_match = norm_class_room.startswith(master_room_str) or norm_class_room.startswith(master_level)
+
+                # Code match: exact or prefix match
                 code_match = False
-                if master_code and courseCode.startswith(master_code):
-                    code_match = True
-                elif not master_code and master_name and courseCode.startswith(master_name):
-                    code_match = True
-                elif master_code == courseCode:
-                    code_match = True
-                    
+                norm_course_code = courseCode.strip()
+                if master_code:
+                    code_match = (master_code == norm_course_code) or norm_course_code.startswith(master_code)
+                elif master_name:
+                    # No code in masterdata — match by subject name
+                    code_match = norm_course_code.startswith(master_name) or master_name in norm_course_code
+
                 if room_match and code_match:
                     credits = float(c.get("หน่วยกิต", 0))
                     return {
