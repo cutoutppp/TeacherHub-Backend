@@ -68,7 +68,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         clean_text = clean_thai_text(full_text)
         lines = clean_text.split('\n')
         
-        header_match = re.search(r'([ก-ฮA-Za-z0-9]+)\s*:\s*(ม\.\d+/\d+)', clean_text)
+        header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9]+)\s*:\s*(ม\.\d+/\d+)', clean_text)
         if header_match:
             course_code = header_match.group(1)
             class_room = header_match.group(2)
@@ -139,8 +139,22 @@ async def get_masterdata(payload: dict):
                 
             courses = result.get("courses", [])
             for c in courses:
-                room_str = f"{c.get('ชั้น', '')}/{c.get('กลุ่ม-ห้อง', '')}"
-                if c.get("รหัสวิชา") == courseCode and room_str == classRoom:
+                master_room_str = f"{c.get('ชั้น', '')}/{c.get('กลุ่ม-ห้อง', '')}"
+                master_class = c.get('ชั้น', '')
+                master_code = str(c.get('รหัสวิชา', '')).strip()
+                master_name = str(c.get('วิชา', '')).strip()
+                
+                room_match = (master_room_str == classRoom) or (classRoom.startswith(master_room_str)) or (classRoom.startswith(master_class))
+                
+                code_match = False
+                if master_code and courseCode.startswith(master_code):
+                    code_match = True
+                elif not master_code and master_name and courseCode.startswith(master_name):
+                    code_match = True
+                elif master_code == courseCode:
+                    code_match = True
+                    
+                if room_match and code_match:
                     credits = float(c.get("หน่วยกิต", 0))
                     return {
                         "success": True,
