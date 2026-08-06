@@ -12,6 +12,52 @@ from .score_db import load_scores_from_json
 
 router = APIRouter()
 
+import asyncio
+import httpx
+from pydantic import BaseModel
+
+save_queue = asyncio.Queue()
+
+async def queue_worker():
+    print("SGS Background Queue Worker started.")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        while True:
+            try:
+                job = await save_queue.get()
+                webhook_url = job.get("webhookUrl")
+                payload = job.get("payload")
+                
+                print(f"Processing queue job for {webhook_url}...")
+                
+                # Send to GAS
+                response = await client.post(
+                    webhook_url,
+                    json=payload,
+                    follow_redirects=True
+                )
+                print(f"GAS Response: {response.status_code}")
+                
+            except Exception as e:
+                print(f"Queue Worker Error: {e}")
+            finally:
+                save_queue.task_done()
+                print("Waiting 5 seconds before next job...")
+                await asyncio.sleep(5)
+
+@router.on_event("startup")
+async def startup_event():
+    asyncio.create_task(queue_worker())
+
+class QueueSaveRequest(BaseModel):
+    webhookUrl: str
+    payload: dict
+
+@router.post("/api/queue_save")
+async def queue_save(req: QueueSaveRequest):
+    await save_queue.put(req.dict())
+    return {"status": "queued", "queue_size": save_queue.qsize()}
+
+
 @router.post("/api/compare")
 async def compare_pdfs(
     files: list[UploadFile] = File(...),
