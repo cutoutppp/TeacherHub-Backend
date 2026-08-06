@@ -14,39 +14,12 @@ router = APIRouter()
 
 import asyncio
 import httpx
+import time
 from pydantic import BaseModel
+from fastapi import HTTPException
 
-save_queue = asyncio.Queue()
-
-async def queue_worker():
-    print("SGS Background Queue Worker started.")
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        while True:
-            try:
-                job = await save_queue.get()
-                webhook_url = job.get("webhookUrl")
-                payload = job.get("payload")
-                
-                print(f"Processing queue job for {webhook_url}...")
-                
-                # Send to GAS
-                response = await client.post(
-                    webhook_url,
-                    json=payload,
-                    follow_redirects=True
-                )
-                print(f"GAS Response: {response.status_code}")
-                
-            except Exception as e:
-                print(f"Queue Worker Error: {e}")
-            finally:
-                save_queue.task_done()
-                print("Waiting 5 seconds before next job...")
-                await asyncio.sleep(5)
-
-@router.on_event("startup")
-async def startup_event():
-    asyncio.create_task(queue_worker())
+request_lock = asyncio.Lock()
+last_request_time = 0
 
 class QueueSaveRequest(BaseModel):
     webhookUrl: str
@@ -54,8 +27,27 @@ class QueueSaveRequest(BaseModel):
 
 @router.post("/api/queue_save")
 async def queue_save(req: QueueSaveRequest):
-    await save_queue.put(req.dict())
-    return {"status": "queued", "queue_size": save_queue.qsize()}
+    global last_request_time
+    
+    async with request_lock:
+        now = time.time()
+        time_since_last = now - last_request_time
+        if time_since_last < 15 and last_request_time != 0:
+            # Wait for the remaining time to ensure a 15-second gap between requests
+            await asyncio.sleep(15 - time_since_last)
+            
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            try:
+                response = await client.post(req.webhookUrl, json=req.payload, follow_redirects=True)
+                last_request_time = time.time()
+                
+                if response.status_code != 200:
+                    raise HTTPException(status_code=500, detail=f"Google Apps Script returned {response.status_code}")
+                
+                return {"status": "success", "gas_status": response.status_code}
+            except Exception as e:
+                last_request_time = time.time()
+                raise HTTPException(status_code=500, detail=f"Failed to communicate with Google Apps Script: {str(e)}")
 
 
 @router.post("/api/compare")
