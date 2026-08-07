@@ -11,14 +11,30 @@ def clean_text(text):
 
 def extract_subject_code(text):
     cleaned = clean_text(text)
-    match = re.search(r'([ก-ฮ]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
+    match = re.search(r'([ก-ฮA-Za-z]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
     if match:
-        return match.group(1).replace(" ", "")
+        code = match.group(1).replace(" ", "")
+        if code.startswith("ข"):
+            code = "I" + code[1:]
+        return code
+    return None
+
+def extract_subject_name(text):
+    cleaned = clean_text(text)
+    # Match something like "ชื่อรายวิชา วิทยาศาสตร์กายภาพ ระดับชั้น"
+    match = re.search(r'ชื่อรายวิชา\s+(.+?)\s+(?:ระดับชั้น|มัธยม|ม\.)', cleaned)
+    if match:
+        return match.group(1).strip()
     return None
 
 def extract_class_level(text):
     cleaned = clean_text(text)
-    # Match "มัธยมศึกษาปีที่ 4/1" or "ม.4/1"
+    # Match "มัธยมศึกษาปีที่ 4/1", "ม.4/1", "มัธยมศึกษาปีที่ 4 ห้อง 1"
+    match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d+)\s*(?:/|ห้อง)\s*(\d+)', cleaned)
+    if match:
+        return "ม." + match.group(1).strip() + "/" + match.group(2).strip()
+    
+    # Fallback to the old one just in case
     match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d\s*/\s*\d+)', cleaned)
     if match:
         return "ม." + match.group(1).replace(" ", "")
@@ -30,6 +46,7 @@ import fitz
 def parse_sgs_pdf(file_content):
     students = {}
     subject_code = None
+    subject_name = None
     class_level = None
     max_scores = {}
     sgs_mapping = {}
@@ -40,6 +57,8 @@ def parse_sgs_pdf(file_content):
             text = page.extract_text()
             if not subject_code:
                 subject_code = extract_subject_code(text)
+            if not subject_name:
+                subject_name = extract_subject_name(text)
             if not class_level:
                 class_level = extract_class_level(text)
                 
@@ -50,33 +69,21 @@ def parse_sgs_pdf(file_content):
                 
                 # Build dynamic column mapping from headers
                 if not sgs_mapping and len(texts) > 1:
-                    row0 = [clean_text(x) for x in texts[0]]
+                    # Hardcode indices because PyMuPDF often merges header cells differently than data rows
+                    # In SGS, the data rows consistently align with: 
+                    # 1=เลขประจำตัว, 2=ชื่อ, 3=เลขที่, 4=ก่อนกลางภาค, 5=กลางภาค, 6=หลังกลางภาค, 7=ปลายภาค, 8=รวม
+                    sgs_mapping = {
+                        "before_mid": 4,
+                        "mid": 5,
+                        "after_mid": 6,
+                        "final": 7,
+                        "total": 8
+                    }
+                    
                     row1 = [clean_text(x) for x in texts[1]]
-                    
-                    sections = [
-                        {"key": "before_mid", "keywords": ["ก่อนกลางภาค", "กลอนกลางภาค", "กลอน\nกลางภาค", "ก่อน\nกลางภาค"]},
-                        {"key": "mid", "keywords": ["กลางภาค"]},
-                        {"key": "after_mid", "keywords": ["หลังกลางภาค", "หลพงกลางภาค", "หลพง\nกลางภาค", "หลัง\nกลางภาค"]},
-                        {"key": "final", "keywords": ["ปลายภาค", "ปลาย\nภาค"]},
-                        {"key": "total", "keywords": ["รวม"]},
-                    ]
-                    
-                    for i, sec in enumerate(sections):
-                        col_idx = -1
-                        for j, val in enumerate(row0):
-                            if any(k in val for k in sec["keywords"]):
-                                if sec["key"] == "mid" and ("หลัง" in val or "หลพง" in val or "ก่อน" in val or "กลอน" in val):
-                                    continue
-                                # make sure 'total' doesn't match something else
-                                if sec["key"] == "total" and j < 6:
-                                    continue
-                                col_idx = j
-                                break
-                                
-                        if col_idx != -1:
-                            sgs_mapping[sec["key"]] = col_idx
-                            if col_idx < len(row1) and str(row1[col_idx]).isdigit():
-                                max_scores[sec["key"]] = int(row1[col_idx])
+                    for key, col_idx in sgs_mapping.items():
+                        if col_idx < len(row1) and str(row1[col_idx]).isdigit():
+                            max_scores[key] = int(row1[col_idx])
                             
                 
                 for row_text, row_bbox in zip(texts, rows_bboxes):
@@ -125,7 +132,7 @@ def parse_sgs_pdf(file_content):
                     students[student_id] = student_data
                     
     fitz_doc.close()
-    return {"subject_code": subject_code, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
+    return {"subject_code": subject_code, "subject_name": subject_name, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
 
 def parse_nextschool_excel(file_content, filename):
     try:
@@ -157,10 +164,6 @@ def parse_nextschool_excel(file_content, filename):
         row2 = df.iloc[2].tolist() if len(df) > 2 else []
         row3 = df.iloc[3].tolist() if len(df) > 3 else []
         
-        # We need mapping for visual rendering on the frontend
-        # The frontend HTML table will be structured exactly like the excel grid
-        # We'll pass the whole grid data back to the frontend!
-        
         grid_data = {
             "cols": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in cols],
             "row0": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in row0],
@@ -169,10 +172,6 @@ def parse_nextschool_excel(file_content, filename):
             "row3": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in row3],
             "data_rows": []
         }
-        
-        # Find indices
-        # We know index 4 to 8 is before_mid, 9 to 10 is mid, 11 to 14 is after_mid, 15 to 16 is final (in the sample)
-        # But to be robust, we should find "ก่อนกลางภาค", "กลางภาค", "หลังกลางภาค", "ปลายภาค" across header rows
         
         col_mapping = {}
         nextschool_mapping = {}
@@ -185,17 +184,21 @@ def parse_nextschool_excel(file_content, filename):
             
             full_header = c_val + " " + r0_val + " " + r1_val + " " + r2_val
             
-            if "ก่อนกลางภาค" in full_header and "รวม" not in full_header: current_section = "before_mid"
-            elif "หลังกลางภาค" in full_header and "รวม" not in full_header: current_section = "after_mid"
-            elif "กลางภาค" in full_header and "รวม" not in full_header: current_section = "mid"
-            elif "ปลายภาค" in full_header and "รวม" not in full_header: current_section = "final"
+            is_before_mid = ("ก่อนกลางภาค" in c_val and "รวม" not in c_val) or ("ก่อนกลางภาค" in r0_val and "รวม" not in r0_val) or ("ก่อนกลางภาค" in r1_val and "รวม" not in r1_val) or ("ก่อนกลางภาค" in r2_val and "รวม" not in r2_val)
+            is_after_mid = ("หลังกลางภาค" in c_val and "รวม" not in c_val) or ("หลังกลางภาค" in r0_val and "รวม" not in r0_val) or ("หลังกลางภาค" in r1_val and "รวม" not in r1_val) or ("หลังกลางภาค" in r2_val and "รวม" not in r2_val)
+            is_mid = ("กลางภาค" in c_val and "รวม" not in c_val and not is_before_mid and not is_after_mid) or ("กลางภาค" in r0_val and "รวม" not in r0_val and not is_before_mid and not is_after_mid) or ("กลางภาค" in r1_val and "รวม" not in r1_val and not is_before_mid and not is_after_mid) or ("กลางภาค" in r2_val and "รวม" not in r2_val and not is_before_mid and not is_after_mid)
+            is_final = ("ปลายภาค" in c_val and "รวม" not in c_val) or ("ปลายภาค" in r0_val and "รวม" not in r0_val) or ("ปลายภาค" in r1_val and "รวม" not in r1_val) or ("ปลายภาค" in r2_val and "รวม" not in r2_val)
+            
+            if is_before_mid: current_section = "before_mid"
+            elif is_after_mid: current_section = "after_mid"
+            elif is_mid: current_section = "mid"
+            elif is_final: current_section = "final"
             
             if current_section:
-                sub_name = full_header
-                
                 if current_section not in nextschool_mapping:
                     nextschool_mapping[current_section] = {"sub_cols": [], "sum_idx": -1}
-                    
+                
+                sub_name = full_header
                 if "รวม" in sub_name:
                     col_mapping[f"{current_section}_sum"] = j
                     nextschool_mapping[current_section]["sum_idx"] = j
@@ -205,7 +208,6 @@ def parse_nextschool_excel(file_content, filename):
                         max_scores[f"{current_section}_sum"] = float(row2[j])
                     current_section = None # end of section
                 elif "สอบ" in sub_name or current_section in ["mid", "final"]:
-                    # Mid or Final exam
                     col_mapping[f"{current_section}_sum"] = j
                     nextschool_mapping[current_section]["sum_idx"] = j
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
@@ -217,8 +219,6 @@ def parse_nextschool_excel(file_content, filename):
                     nextschool_mapping[current_section]["sub_cols"].append(j)
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
                         max_scores[f"{current_section}_sub_{j}"] = float(row1[j])
-                    elif j < len(row2) and not (isinstance(row2[j], float) and math.isnan(row2[j])):
-                        max_scores[f"{current_section}_sub_{j}"] = float(row2[j])
         
         for i in range(2, len(df)):
             row = df.iloc[i].tolist()
@@ -261,6 +261,21 @@ def parse_nextschool_excel(file_content, filename):
                         parts = key.split("_sub_")
                         if len(parts) == 2:
                             student_data["subs"][parts[0]][parts[1]] = str_val
+                            
+                # Auto-sum if missing
+                for sec in ["before_mid", "after_mid", "mid", "final"]:
+                    if sec not in student_data["sums"] or not str(student_data["sums"][sec]).strip():
+                        sec_sum = 0
+                        has_val = False
+                        for sub_val in student_data["subs"][sec].values():
+                            try:
+                                sec_sum += float(sub_val)
+                                has_val = True
+                            except ValueError:
+                                pass
+                        if has_val:
+                            # Format without trailing .0 if integer
+                            student_data["sums"][sec] = str(int(sec_sum)) if sec_sum.is_integer() else str(sec_sum)
                             
                 students[student_id] = student_data
                 
