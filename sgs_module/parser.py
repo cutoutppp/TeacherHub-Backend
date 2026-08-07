@@ -11,30 +11,14 @@ def clean_text(text):
 
 def extract_subject_code(text):
     cleaned = clean_text(text)
-    match = re.search(r'([ก-ฮA-Za-z]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
+    match = re.search(r'([ก-ฮ]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
     if match:
-        code = match.group(1).replace(" ", "")
-        if code.startswith("ข"):
-            code = "I" + code[1:]
-        return code
-    return None
-
-def extract_subject_name(text):
-    cleaned = clean_text(text)
-    # Match something like "ชื่อรายวิชา วิทยาศาสตร์กายภาพ ระดับชั้น"
-    match = re.search(r'ชื่อรายวิชา\s+(.+?)\s+(?:ระดับชั้น|มัธยม|ม\.)', cleaned)
-    if match:
-        return match.group(1).strip()
+        return match.group(1).replace(" ", "")
     return None
 
 def extract_class_level(text):
     cleaned = clean_text(text)
-    # Match "มัธยมศึกษาปีที่ 4/1", "ม.4/1", "มัธยมศึกษาปีที่ 4 ห้อง 1"
-    match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d+)\s*(?:/|ห้อง)\s*(\d+)', cleaned)
-    if match:
-        return "ม." + match.group(1).strip() + "/" + match.group(2).strip()
-    
-    # Fallback to the old one just in case
+    # Match "มัธยมศึกษาปีที่ 4/1" or "ม.4/1"
     match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d\s*/\s*\d+)', cleaned)
     if match:
         return "ม." + match.group(1).replace(" ", "")
@@ -46,7 +30,6 @@ import fitz
 def parse_sgs_pdf(file_content):
     students = {}
     subject_code = None
-    subject_name = None
     class_level = None
     max_scores = {}
     sgs_mapping = {}
@@ -57,8 +40,6 @@ def parse_sgs_pdf(file_content):
             text = page.extract_text()
             if not subject_code:
                 subject_code = extract_subject_code(text)
-            if not subject_name:
-                subject_name = extract_subject_name(text)
             if not class_level:
                 class_level = extract_class_level(text)
                 
@@ -144,7 +125,7 @@ def parse_sgs_pdf(file_content):
                     students[student_id] = student_data
                     
     fitz_doc.close()
-    return {"subject_code": subject_code, "subject_name": subject_name, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
+    return {"subject_code": subject_code, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
 
 def parse_nextschool_excel(file_content, filename):
     try:
@@ -191,20 +172,26 @@ def parse_nextschool_excel(file_content, filename):
         
         # Find indices
         # We know index 4 to 8 is before_mid, 9 to 10 is mid, 11 to 14 is after_mid, 15 to 16 is final (in the sample)
-        # But to be robust, we should find "ก่อนกลางภาค", "กลางภาค", "หลังกลางภาค", "ปลายภาค" in cols
+        # But to be robust, we should find "ก่อนกลางภาค", "กลางภาค", "หลังกลางภาค", "ปลายภาค" across header rows
         
         col_mapping = {}
         nextschool_mapping = {}
         current_section = None
-        for j, col_name in enumerate(cols):
-            val = str(col_name).strip()
-            if "ก่อนกลางภาค" in val and "รวม" not in val: current_section = "before_mid"
-            elif "หลังกลางภาค" in val and "รวม" not in val: current_section = "after_mid"
-            elif "กลางภาค" in val and "รวม" not in val: current_section = "mid"
-            elif "ปลายภาค" in val and "รวม" not in val: current_section = "final"
+        for j in range(len(cols)):
+            c_val = str(cols[j]).strip() if j < len(cols) else ""
+            r0_val = str(row0[j]).strip() if j < len(row0) else ""
+            r1_val = str(row1[j]).strip() if j < len(row1) else ""
+            r2_val = str(row2[j]).strip() if j < len(row2) else ""
+            
+            full_header = c_val + " " + r0_val + " " + r1_val + " " + r2_val
+            
+            if "ก่อนกลางภาค" in full_header and "รวม" not in full_header: current_section = "before_mid"
+            elif "หลังกลางภาค" in full_header and "รวม" not in full_header: current_section = "after_mid"
+            elif "กลางภาค" in full_header and "รวม" not in full_header: current_section = "mid"
+            elif "ปลายภาค" in full_header and "รวม" not in full_header: current_section = "final"
             
             if current_section:
-                sub_name = str(row0[j]).strip()
+                sub_name = full_header
                 
                 if current_section not in nextschool_mapping:
                     nextschool_mapping[current_section] = {"sub_cols": [], "sum_idx": -1}
@@ -214,6 +201,8 @@ def parse_nextschool_excel(file_content, filename):
                     nextschool_mapping[current_section]["sum_idx"] = j
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
                         max_scores[f"{current_section}_sum"] = float(row1[j])
+                    elif j < len(row2) and not (isinstance(row2[j], float) and math.isnan(row2[j])):
+                        max_scores[f"{current_section}_sum"] = float(row2[j])
                     current_section = None # end of section
                 elif "สอบ" in sub_name or current_section in ["mid", "final"]:
                     # Mid or Final exam
@@ -221,11 +210,15 @@ def parse_nextschool_excel(file_content, filename):
                     nextschool_mapping[current_section]["sum_idx"] = j
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
                         max_scores[f"{current_section}_sum"] = float(row1[j])
+                    elif j < len(row2) and not (isinstance(row2[j], float) and math.isnan(row2[j])):
+                        max_scores[f"{current_section}_sum"] = float(row2[j])
                 else:
                     col_mapping[f"{current_section}_sub_{j}"] = j
                     nextschool_mapping[current_section]["sub_cols"].append(j)
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
                         max_scores[f"{current_section}_sub_{j}"] = float(row1[j])
+                    elif j < len(row2) and not (isinstance(row2[j], float) and math.isnan(row2[j])):
+                        max_scores[f"{current_section}_sub_{j}"] = float(row2[j])
         
         for i in range(2, len(df)):
             row = df.iloc[i].tolist()
