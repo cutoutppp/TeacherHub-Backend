@@ -11,30 +11,14 @@ def clean_text(text):
 
 def extract_subject_code(text):
     cleaned = clean_text(text)
-    match = re.search(r'([ก-ฮA-Za-z]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
+    match = re.search(r'([ก-ฮ]\s*\d\s*\d\s*\d\s*\d\s*\d)', cleaned)
     if match:
-        code = match.group(1).replace(" ", "")
-        if code.startswith("ข"):
-            code = "I" + code[1:]
-        return code
-    return None
-
-def extract_subject_name(text):
-    cleaned = clean_text(text)
-    # Match something like "ชื่อรายวิชา วิทยาศาสตร์กายภาพ ระดับชั้น"
-    match = re.search(r'ชื่อรายวิชา\s+(.+?)\s+(?:ระดับชั้น|มัธยม|ม\.)', cleaned)
-    if match:
-        return match.group(1).strip()
+        return match.group(1).replace(" ", "")
     return None
 
 def extract_class_level(text):
     cleaned = clean_text(text)
-    # Match "มัธยมศึกษาปีที่ 4/1", "ม.4/1", "มัธยมศึกษาปีที่ 4 ห้อง 1"
-    match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d+)\s*(?:/|ห้อง)\s*(\d+)', cleaned)
-    if match:
-        return "ม." + match.group(1).strip() + "/" + match.group(2).strip()
-    
-    # Fallback to the old one just in case
+    # Match "มัธยมศึกษาปีที่ 4/1" or "ม.4/1"
     match = re.search(r'(?:มัธยมศึกษาปีที่|ม\.)\s*(\d\s*/\s*\d+)', cleaned)
     if match:
         return "ม." + match.group(1).replace(" ", "")
@@ -46,7 +30,6 @@ import fitz
 def parse_sgs_pdf(file_content):
     students = {}
     subject_code = None
-    subject_name = None
     class_level = None
     max_scores = {}
     sgs_mapping = {}
@@ -57,8 +40,6 @@ def parse_sgs_pdf(file_content):
             text = page.extract_text()
             if not subject_code:
                 subject_code = extract_subject_code(text)
-            if not subject_name:
-                subject_name = extract_subject_name(text)
             if not class_level:
                 class_level = extract_class_level(text)
                 
@@ -132,7 +113,7 @@ def parse_sgs_pdf(file_content):
                     students[student_id] = student_data
                     
     fitz_doc.close()
-    return {"subject_code": subject_code, "subject_name": subject_name, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
+    return {"subject_code": subject_code, "class_level": class_level, "students": students, "max_scores": max_scores, "mapping": sgs_mapping}
 
 def parse_nextschool_excel(file_content, filename):
     try:
@@ -164,6 +145,10 @@ def parse_nextschool_excel(file_content, filename):
         row2 = df.iloc[2].tolist() if len(df) > 2 else []
         row3 = df.iloc[3].tolist() if len(df) > 3 else []
         
+        # We need mapping for visual rendering on the frontend
+        # The frontend HTML table will be structured exactly like the excel grid
+        # We'll pass the whole grid data back to the frontend!
+        
         grid_data = {
             "cols": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in cols],
             "row0": ["" if (isinstance(x, float) and math.isnan(x)) else str(x) for x in row0],
@@ -173,9 +158,18 @@ def parse_nextschool_excel(file_content, filename):
             "data_rows": []
         }
         
+        # Find indices
+        # We know index 4 to 8 is before_mid, 9 to 10 is mid, 11 to 14 is after_mid, 15 to 16 is final (in the sample)
+        # But to be robust, we should find "ก่อนกลางภาค", "กลางภาค", "หลังกลางภาค", "ปลายภาค" across header rows
+        
         col_mapping = {}
         nextschool_mapping = {}
         current_section = None
+        
+        def has_kw(val, keywords):
+            clean_v = str(val).replace('\n', '').replace(' ', '')
+            return any(k in clean_v for k in keywords)
+            
         for j in range(len(cols)):
             c_val = str(cols[j]).strip() if j < len(cols) else ""
             r0_val = str(row0[j]).strip() if j < len(row0) else ""
@@ -184,10 +178,15 @@ def parse_nextschool_excel(file_content, filename):
             
             full_header = c_val + " " + r0_val + " " + r1_val + " " + r2_val
             
-            is_before_mid = ("ก่อนกลางภาค" in c_val and "รวม" not in c_val) or ("ก่อนกลางภาค" in r0_val and "รวม" not in r0_val) or ("ก่อนกลางภาค" in r1_val and "รวม" not in r1_val) or ("ก่อนกลางภาค" in r2_val and "รวม" not in r2_val)
-            is_after_mid = ("หลังกลางภาค" in c_val and "รวม" not in c_val) or ("หลังกลางภาค" in r0_val and "รวม" not in r0_val) or ("หลังกลางภาค" in r1_val and "รวม" not in r1_val) or ("หลังกลางภาค" in r2_val and "รวม" not in r2_val)
-            is_mid = ("กลางภาค" in c_val and "รวม" not in c_val and not is_before_mid and not is_after_mid) or ("กลางภาค" in r0_val and "รวม" not in r0_val and not is_before_mid and not is_after_mid) or ("กลางภาค" in r1_val and "รวม" not in r1_val and not is_before_mid and not is_after_mid) or ("กลางภาค" in r2_val and "รวม" not in r2_val and not is_before_mid and not is_after_mid)
-            is_final = ("ปลายภาค" in c_val and "รวม" not in c_val) or ("ปลายภาค" in r0_val and "รวม" not in r0_val) or ("ปลายภาค" in r1_val and "รวม" not in r1_val) or ("ปลายภาค" in r2_val and "รวม" not in r2_val)
+            bm_kws = ["ก่อนกลางภาค", "กลอนกลางภาค"]
+            am_kws = ["หลังกลางภาค", "หลพงกลางภาค"]
+            m_kws = ["กลางภาค"]
+            f_kws = ["ปลายภาค"]
+            
+            is_before_mid = (has_kw(c_val, bm_kws) and not has_kw(c_val, ["รวม"])) or (has_kw(r0_val, bm_kws) and not has_kw(r0_val, ["รวม"])) or (has_kw(r1_val, bm_kws) and not has_kw(r1_val, ["รวม"])) or (has_kw(r2_val, bm_kws) and not has_kw(r2_val, ["รวม"]))
+            is_after_mid = (has_kw(c_val, am_kws) and not has_kw(c_val, ["รวม"])) or (has_kw(r0_val, am_kws) and not has_kw(r0_val, ["รวม"])) or (has_kw(r1_val, am_kws) and not has_kw(r1_val, ["รวม"])) or (has_kw(r2_val, am_kws) and not has_kw(r2_val, ["รวม"]))
+            is_mid = (has_kw(c_val, m_kws) and not has_kw(c_val, ["รวม"]) and not is_before_mid and not is_after_mid) or (has_kw(r0_val, m_kws) and not has_kw(r0_val, ["รวม"]) and not is_before_mid and not is_after_mid) or (has_kw(r1_val, m_kws) and not has_kw(r1_val, ["รวม"]) and not is_before_mid and not is_after_mid) or (has_kw(r2_val, m_kws) and not has_kw(r2_val, ["รวม"]) and not is_before_mid and not is_after_mid)
+            is_final = (has_kw(c_val, f_kws) and not has_kw(c_val, ["รวม"])) or (has_kw(r0_val, f_kws) and not has_kw(r0_val, ["รวม"])) or (has_kw(r1_val, f_kws) and not has_kw(r1_val, ["รวม"])) or (has_kw(r2_val, f_kws) and not has_kw(r2_val, ["รวม"]))
             
             if is_before_mid: current_section = "before_mid"
             elif is_after_mid: current_section = "after_mid"
@@ -195,10 +194,11 @@ def parse_nextschool_excel(file_content, filename):
             elif is_final: current_section = "final"
             
             if current_section:
+                sub_name = full_header
+                
                 if current_section not in nextschool_mapping:
                     nextschool_mapping[current_section] = {"sub_cols": [], "sum_idx": -1}
-                
-                sub_name = full_header
+                    
                 if "รวม" in sub_name:
                     col_mapping[f"{current_section}_sum"] = j
                     nextschool_mapping[current_section]["sum_idx"] = j
@@ -208,6 +208,7 @@ def parse_nextschool_excel(file_content, filename):
                         max_scores[f"{current_section}_sum"] = float(row2[j])
                     current_section = None # end of section
                 elif "สอบ" in sub_name or current_section in ["mid", "final"]:
+                    # Mid or Final exam
                     col_mapping[f"{current_section}_sum"] = j
                     nextschool_mapping[current_section]["sum_idx"] = j
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
@@ -219,6 +220,21 @@ def parse_nextschool_excel(file_content, filename):
                     nextschool_mapping[current_section]["sub_cols"].append(j)
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
                         max_scores[f"{current_section}_sub_{j}"] = float(row1[j])
+                    elif j < len(row2) and not (isinstance(row2[j], float) and math.isnan(row2[j])):
+                        max_scores[f"{current_section}_sub_{j}"] = float(row2[j])
+                        
+        # Auto-sum max_scores if sum column is missing
+        for sec in ["before_mid", "after_mid", "mid", "final"]:
+            sum_key = f"{sec}_sum"
+            if sum_key not in max_scores:
+                sec_max_sum = 0
+                has_val = False
+                for k, v in max_scores.items():
+                    if k.startswith(f"{sec}_sub_"):
+                        sec_max_sum += float(v)
+                        has_val = True
+                if has_val:
+                    max_scores[sum_key] = sec_max_sum
         
         for i in range(2, len(df)):
             row = df.iloc[i].tolist()
