@@ -51,7 +51,7 @@ def login(request: LoginRequest, db = Depends(get_db)):
                   verify_pin(default_pin1, teacher.pin_hash) or 
                   verify_pin(default_pin2, teacher.pin_hash))
 
-    if is_default:
+    if pin == "" and is_default:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="FIRST_TIME_LOGIN"
