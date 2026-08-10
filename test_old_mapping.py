@@ -1,5 +1,5 @@
 import pdfplumber
-import re
+import re 
 
 def clean_text(text):
     if text is None: return ""
