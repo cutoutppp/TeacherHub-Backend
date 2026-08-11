@@ -89,8 +89,8 @@ async def upload_pdf(file: UploadFile = File(...)):
                     marks_data = []
                     for w in line:
                         clean_w = clean_thai_text(w[4])
-                        # marks can be ✔ ✘ ลป / X ส ล. H ล 
-                        if clean_w in ('✔', '✘', 'ลป', '/', 'X', 'x', 'ส', 'ล.', 'H', 'ล'):
+                        # marks can be ✔ ✘ ลป / X ส ล. H ล ลว ลก
+                        if clean_w in ('✔', '✘', 'ลป', '/', 'X', 'x', 'ส', 'ล.', 'H', 'ล', 'ลว', 'ลก'):
                             marks_data.append({"text": clean_w, "x": (w[0] + w[2]) / 2})
                     all_student_marks.append({"studentId": student_id, "marks": marks_data})
                     
@@ -133,7 +133,7 @@ async def upload_pdf(file: UploadFile = File(...)):
                     course_code = header_match.group(1)
                     class_room = header_match.group(2)
             
-        student_regex = re.compile(r'^(\d+)\s+(\d{5,6})\s+(.*?)\s+([✔✘/Xxสล\.H\s]+)$')
+        student_regex = re.compile(r'^(\d+)\s+(\d{5,6})\s+(.*?)\s+([✔✘/Xxสล\.Hปกว\s]+)$')
         
 
         
@@ -155,7 +155,11 @@ async def upload_pdf(file: UploadFile = File(...)):
                     clean_full_name = re.sub(r'\s+', ' ', name_raw.strip())
                     present_count = marks_str.count('✔') + marks_str.count('/')
                     absent_count = marks_str.count('✘') + marks_str.count('X') + marks_str.count('x')
-                    leave_count = len(re.findall(r'ล[ก-ฮ]', marks_str)) + marks_str.count('ส') + marks_str.count('ล.') + marks_str.count('H') + marks_str.count('ล')
+                    
+                    two_char_leaves = re.findall(r'ล[ปกว\.]', marks_str)
+                    leave_count = len(two_char_leaves)
+                    leave_count += marks_str.count('ส') + marks_str.count('H')
+                    leave_count += marks_str.count('ล') - len(two_char_leaves)
                     
                     result.append({
                         "no": int(seq),
