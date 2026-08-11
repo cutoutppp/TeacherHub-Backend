@@ -94,9 +94,7 @@ async def upload_pdf(file: UploadFile = File(...)):
                             marks_data.append({"text": clean_w, "x": (w[0] + w[2]) / 2})
                     all_student_marks.append({"studentId": student_id, "marks": marks_data})
                     
-        doc.close()
-        
-        full_text = "\\n".join(extracted_lines)
+        full_text = "\n".join(extracted_lines)
         clean_text = clean_thai_text(full_text)
         lines = clean_text.split('\n')
         
@@ -118,6 +116,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         old_full_text = ""
         for page in doc:
             old_full_text += page.get_text("text") + "\n"
+        doc.close()
+        
         old_clean_text = clean_thai_text(old_full_text)
         old_lines = old_clean_text.split('\n')
         
