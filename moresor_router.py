@@ -40,6 +40,11 @@ async def upload_pdf(file: UploadFile = File(...)):
         class_room = ''
         
         doc = fitz.open(stream=content, filetype="pdf")
+        
+        # New alignment variables
+        date_columns = [] # list of {text, x}
+        all_student_marks = [] # list of dicts with student marks mapped to x
+        
         extracted_lines = []
         for page in doc:
             words = page.get_text("words")
@@ -57,71 +62,136 @@ async def upload_pdf(file: UploadFile = File(...)):
                 if not found:
                     lines_group.append([w])
             
+            # Find date columns if not found yet
+            if not date_columns:
+                for line in lines_group:
+                    line.sort(key=lambda x: x[0])
+                    # If this line has many digits and looks like a header
+                    if sum(1 for w in line if clean_thai_text(w[4]).isdigit()) >= 10:
+                        # Extract digits as columns
+                        for w in line:
+                            t = clean_thai_text(w[4])
+                            if t.isdigit():
+                                date_columns.append({"text": t, "x": (w[0] + w[2]) / 2})
+                        if date_columns:
+                            break
+
             for line in lines_group:
                 line.sort(key=lambda x: x[0])
                 line_str = " ".join([w[4] for w in line])
                 extracted_lines.append(line_str)
+                
+                # Check if it's a student line to extract raw marks and x coordinates
+                clean_text_line = clean_thai_text(line_str)
+                match = re.search(r'^(\d+)\s+(\d{5,6})', clean_text_line)
+                if match:
+                    student_id = match.group(2)
+                    marks_data = []
+                    for w in line:
+                        clean_w = clean_thai_text(w[4])
+                        # marks can be ✔ ✘ ลป / X ส ล. H ล 
+                        if clean_w in ('✔', '✘', 'ลป', '/', 'X', 'x', 'ส', 'ล.', 'H', 'ล'):
+                            marks_data.append({"text": clean_w, "x": (w[0] + w[2]) / 2})
+                    all_student_marks.append({"studentId": student_id, "marks": marks_data})
+                    
         doc.close()
         
-        full_text = "\n".join(extracted_lines)
-                
+        full_text = "\\n".join(extracted_lines)
         clean_text = clean_thai_text(full_text)
         lines = clean_text.split('\n')
         
-        header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(ม\.\d+(?:/\d+)?)', clean_text)
-        if not header_match:
-            # Fallback: try without ม. prefix (e.g. "5/1" or just "5")
-            header_match = re.search(r'([\u0E00-\u0E7FA-Za-z0-9/]+)\s*:\s*(\d+(?:/\d+)?)', clean_text)
+        # New robust header extraction
+        header_match = re.search(r'([ก-ฮa-zA-Z]?\d{5})[^\d]*?(ม\.\d+/\d+|\d+/\d+)', clean_text)
         if header_match:
             course_code = header_match.group(1)
             class_room = header_match.group(2)
+        else:
+            # Fallback
+            header_match = re.search(r'([฀-๿A-Za-z0-9/]+)\s*[:|]\s*(ม\.\d+(?:/\d+)?)', clean_text)
+            if header_match:
+                course_code = header_match.group(1)
+                class_room = header_match.group(2)
             
-        student_regex = re.compile(r'^(\d+)\s+(\d{5,6})\s+(นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.)\s+(.*?)\s*([✔✘\s]*(?:ล[ก-ฮ][✔✘\s]*)*)$')
+        student_regex = re.compile(r'^(\d+)\s+(\d{5,6})\s+(.*?)\s+([✔✘/Xxสล\.H\s]+)$')
         
-        inside_summary = False
-        for line in lines:
-            if 'สรุปเวลา' in line:
-                inside_summary = True
-            if inside_summary:
-                continue
-                
-            match = student_regex.search(line.strip())
-            if match:
-                seq, student_id, prefix_short, full_name_raw, marks_str = match.groups()
-                
-                if any(s['studentId'] == student_id for s in students):
+        # --- FALLBACK: Try original get_text("text") method first ---
+        old_full_text = ""
+        for page in doc:
+            old_full_text += page.get_text("text") + "\n"
+        old_clean_text = clean_thai_text(old_full_text)
+        old_lines = old_clean_text.split('\n')
+        
+        def extract_students(target_lines):
+            result = []
+            inside_summary = False
+            for line in target_lines:
+                if 'สรุปเวลา' in line:
+                    inside_summary = True
+                if inside_summary:
                     continue
                     
-                prefix_full = PREFIX_MAP.get(prefix_short, prefix_short)
-                clean_full_name = re.sub(r'\s+', ' ', f"{prefix_full}{full_name_raw.strip()}")
-                
-                present_count = marks_str.count('✔')
-                absent_count = marks_str.count('✘')
-                leave_count = len(re.findall(r'ล[ก-ฮ]', marks_str))
-                
-                students.append({
-                    "no": int(seq),
-                    "studentId": student_id,
-                    "fullName": clean_full_name,
-                    "classRoom": class_room,
-                    "courseCode": course_code,
-                    "present": present_count,
-                    "absent": absent_count,
-                    "leave": leave_count,
-                    "totalAttended": present_count + leave_count
-                })
+                match = student_regex.search(line.strip())
+                if match:
+                    seq, student_id, name_raw, marks_str = match.groups()
+                    if any(s['studentId'] == student_id for s in result):
+                        continue
+                        
+                    clean_full_name = re.sub(r'\s+', ' ', name_raw.strip())
+                    present_count = marks_str.count('✔') + marks_str.count('/')
+                    absent_count = marks_str.count('✘') + marks_str.count('X') + marks_str.count('x')
+                    leave_count = len(re.findall(r'ล[ก-ฮ]', marks_str)) + marks_str.count('ส') + marks_str.count('ล.') + marks_str.count('H') + marks_str.count('ล')
+                    
+                    result.append({
+                        "no": int(seq),
+                        "studentId": student_id,
+                        "fullName": clean_full_name,
+                        "classRoom": class_room,
+                        "courseCode": course_code,
+                        "present": present_count,
+                        "absent": absent_count,
+                        "leave": leave_count,
+                        "totalAttended": present_count + leave_count
+                    })
+            return result
+
+        # 1. Try original method
+        students = extract_students(old_lines)
+        
+        # 2. If it fails, try the new demo method
+        if not students:
+            students = extract_students(lines)
                 
         if len(students) > 0 and all(s['present'] == 0 for s in students):
             return {
                 "success": False,
-                "error": "ไม่สามารถบันทึกได้ เนื่องจากแบบฟอร์มนี้ยังไม่ได้เช็คชื่อ (นักเรียนได้ ✘ ทุกคน)"
+                "error": "ไม่สามารถบันทึกได้ เนื่องจากแบบฟอร์มนี้ยังไม่ได้เช็คชื่อ (นักเรียนได้ ✘ หรือ X ทุกคน)"
             }
+            
+        # ROUND 3 LOGIC: Find missing columns
+        missing_columns = []
+        if date_columns and all_student_marks:
+            for i, col in enumerate(date_columns):
+                has_mark = False
+                for student in all_student_marks:
+                    for mark in student["marks"]:
+                        if abs(mark["x"] - col["x"]) < 15:
+                            has_mark = True
+                            break
+                    if has_mark:
+                        break
+                
+                if not has_mark:
+                    missing_columns.append({
+                        "colIndex": i + 1,
+                        "dateText": col["text"]
+                    })
                 
         return {
             "success": True,
             "students": students,
             "courseCode": course_code,
-            "classRoom": class_room
+            "classRoom": class_room,
+            "missingColumns": missing_columns
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
