@@ -100,26 +100,42 @@ async def upload_pdf(file: UploadFile = File(...)):
         clean_text = clean_thai_text(full_text)
         lines = clean_text.split('\n')
         
-        # New robust header extraction
+        course_code = ""
+        class_room = ""
+        
+        # Try finding header in new clean_text first
         header_match = re.search(r'([ก-ฮa-zA-Z]?\d{5})[^\d]*?(ม\.\d+/\d+|\d+/\d+)', clean_text)
         if header_match:
             course_code = header_match.group(1)
             class_room = header_match.group(2)
         else:
-            # Fallback
             header_match = re.search(r'([฀-๿A-Za-z0-9/]+)\s*[:|]\s*(ม\.\d+(?:/\d+)?)', clean_text)
             if header_match:
                 course_code = header_match.group(1)
                 class_room = header_match.group(2)
-            
-        student_regex = re.compile(r'^(\d+)\s+(\d{5,6})\s+(.*?)\s+([✔✘/Xxสล\.H\s]+)$')
-        
+                
         # --- FALLBACK: Try original get_text("text") method first ---
         old_full_text = ""
         for page in doc:
             old_full_text += page.get_text("text") + "\n"
         old_clean_text = clean_thai_text(old_full_text)
         old_lines = old_clean_text.split('\n')
+        
+        # If still not found, try finding header in old_clean_text
+        if not course_code or not class_room:
+            header_match = re.search(r'([ก-ฮa-zA-Z]?\d{5})[^\d]*?(ม\.\d+/\d+|\d+/\d+)', old_clean_text)
+            if header_match:
+                course_code = header_match.group(1)
+                class_room = header_match.group(2)
+            else:
+                header_match = re.search(r'([฀-๿A-Za-z0-9/]+)\s*[:|]\s*(ม\.\d+(?:/\d+)?)', old_clean_text)
+                if header_match:
+                    course_code = header_match.group(1)
+                    class_room = header_match.group(2)
+            
+        student_regex = re.compile(r'^(\d+)\s+(\d{5,6})\s+(.*?)\s+([✔✘/Xxสล\.H\s]+)$')
+        
+
         
         def extract_students(target_lines):
             result = []
