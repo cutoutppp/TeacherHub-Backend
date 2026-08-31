@@ -116,7 +116,6 @@ async def upload_pdf(file: UploadFile = File(...)):
         old_full_text = ""
         for page in doc:
             old_full_text += page.get_text("text") + "\n"
-        doc.close()
         
         old_clean_text = clean_thai_text(old_full_text)
         old_lines = old_clean_text.split('\n')
@@ -139,12 +138,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         
         def extract_students(target_lines):
             result = []
-            inside_summary = False
             for line in target_lines:
-                if 'สรุปเวลา' in line:
-                    inside_summary = True
-                if inside_summary:
-                    continue
                     
                 match = student_regex.search(line.strip())
                 if match:
@@ -215,6 +209,12 @@ async def upload_pdf(file: UploadFile = File(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'doc' in locals() and doc is not None:
+            try:
+                doc.close()
+            except:
+                pass
 
 @router.post("/masterdata")
 async def get_masterdata(payload: dict):
