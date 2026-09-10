@@ -567,26 +567,25 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                         bbox_key = f"{sec}_sum" if sec == "after_mid" else "final"
                         add_highlight("nextschool", ns_page, ns["bboxes"].get(bbox_key), "red")
 
-                    # ช่องย่อย (เฉพาะหลังกลางภาค)
-                    if sec == "after_mid":
-                        subs = ns.get("subs", {}).get(sec, {})
-                        sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
-                        for i_sub, (sub_idx, sub_val_str) in enumerate(sorted_subs_items):
-                            unit_num = i_sub + 1
+                    # ช่องย่อย (หลังกลางภาค และ ปลายภาค)
+                    subs = ns.get("subs", {}).get(sec, {})
+                    sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
+                    for i_sub, (sub_idx, sub_val_str) in enumerate(sorted_subs_items):
+                        unit_num = i_sub + 1
+                        try:
+                            val_sub = float(sub_val_str) if sub_val_str else 0
+                        except ValueError:
+                            val_sub = 0
+                        if val_sub > 0:
                             try:
-                                val_sub = float(sub_val_str) if sub_val_str else 0
-                            except ValueError:
-                                val_sub = 0
-                            if val_sub > 0:
-                                try:
-                                    header_name = find_header_name(ns_grid, int(sub_idx))
-                                    display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
-                                except (ValueError, IndexError):
-                                    display_name = f"หน่วยที่ {unit_num}"
-                                results["errors"].append({
-                                    "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                                    "message": f"NextSchool: ติด 'มส' แต่ช่องย่อย {display_name} ({sec_name}) มีคะแนน ({val_sub}) ต้องเว้นว่าง"
-                                })
-                                add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sub_{sub_idx}"), "red")
+                                header_name = find_header_name(ns_grid, int(sub_idx))
+                                display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
+                            except (ValueError, IndexError):
+                                display_name = f"หน่วยที่ {unit_num}"
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                "message": f"NextSchool: ติด 'มส' แต่ช่องย่อย {display_name} ({sec_name}) มีคะแนน ({val_sub}) ต้องเว้นว่าง"
+                            })
+                            add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sub_{sub_idx}"), "red")
 
     return results
