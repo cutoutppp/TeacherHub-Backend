@@ -7,7 +7,7 @@ import base64
 from .parser import parse_sgs_pdf, parse_nextschool_excel
 from .validator import validate_scores
 from .doc_generator import generate_wp16, generate_wp17, generate_wp25, generate_wp25_group
-from .work_db import get_works_for_teacher, add_work, get_rooms_for_subject
+from .work_db import get_works_for_teacher, add_work, get_rooms_for_subject, get_rooms_for_group
 from .score_db import load_scores_from_json
 
 router = APIRouter()
@@ -320,6 +320,19 @@ async def api_export_wp17_saved(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+def _get_fallback_demo_rooms(name):
+    return [{
+        "teacher_name": name or "Demo",
+        "subject_code": "demo101",
+        "subject_name": "Demo Subject",
+        "class_level": "M.1/1",
+        "raw_data": {
+            "sgs_students": {
+                "1": {"student_id": "10001", "prefix": "Mr.", "firstname": "Test", "lastname": "Student", "grade": "4.0", "attributes": "3", "reading": "3"}
+            }
+        }
+    }]
 
 @router.post("/api/export/wp25")
 async def export_wp25(request: Request):
