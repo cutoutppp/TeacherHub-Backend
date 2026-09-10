@@ -554,4 +554,4 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             add_highlight("nextschool", ns_page, ns["bboxes"].get(bbox_key), "red")
 
 
-        return results
+    return results
