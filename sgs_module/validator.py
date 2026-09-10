@@ -236,7 +236,9 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
 
         # 2. Consistency & Strict Checks on SGS (Only for final)
         if round_type == "final":
-            grade = str(sgs.get("grade", ""))
+            grade = str(sgs.get("grade", "")).strip()
+            if grade.endswith(".0"):
+                grade = grade[:-2]
             
             # check ONLY items 3, 4, 6 (indices 2, 3, 5) for Consistency
             check_indices = {2, 3, 5}
