@@ -512,13 +512,13 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             })
                             add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "red")
 
-                    if ns_grade_raw == "มส":
+                    if sgs_grade_raw == "มส":
                         if sec == "final":
                             ns_val_str = ns.get("final", "0")
                             if not ns_val_str or ns_val_str == "0":
                                 ns_val_str = ns.get("sums", {}).get("final", "0")
                         else:
-                            ns_val_str = ns.get("sums", {}).get(f"{sec}_sum", "0")
+                            ns_val_str = ns.get("sums", {}).get(sec, "0")
                         try: ns_val = float(ns_val_str) if ns_val_str else 0
                         except ValueError: ns_val = 0
                         if ns_val > 0:
