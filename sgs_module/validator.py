@@ -520,8 +520,10 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                     add_highlight("nextschool", ns_page, ns["bboxes"].get("total"), "red")
 
             # Rule 6.3: ติด มส ห้ามมีคะแนนหลังกลางภาค (ยอดรวม + แต่ละช่องย่อย) และคะแนนปลายภาค
+            # ตรวจแยกกัน: SGS ตามเกรด SGS / NextSchool ตามเกรด NextSchool
+            
+            # ตรวจรายชื่อ (ใช้ sgs เป็นหลัก)
             if sgs_grade_raw == "มส":
-                # ตรวจรายชื่อ
                 if ms_list and sid not in ms_list:
                     results["errors"].append({
                         "student_id": sid, "name": name, "type": "Grade Rule Violation",
@@ -530,10 +532,10 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                     add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
                     add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
 
-                # ตรวจหลังกลางภาค + ปลายภาค
-                for sec, sec_name in [("after_mid", "หลังกลางภาค"), ("final", "ปลายภาค")]:
+            for sec, sec_name in [("after_mid", "หลังกลางภาค"), ("final", "ปลายภาค")]:
 
-                    # SGS: ตรวจยอดรวมช่วงนั้น
+                # --- SGS: ตรวจเฉพาะเมื่อ SGS grade เป็น มส ---
+                if sgs_grade_raw == "มส":
                     sgs_val_str = sgs.get("scores", {}).get(sec, "")
                     try:
                         sgs_val = float(sgs_val_str) if sgs_val_str else 0
@@ -546,7 +548,9 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                         })
                         add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "red")
 
-                    # NextSchool: ตรวจยอดรวมช่วงนั้น
+                # --- NextSchool: ตรวจเฉพาะเมื่อ NS grade เป็น มส ---
+                if ns_grade_raw == "มส":
+                    # ยอดรวม
                     if sec == "final":
                         ns_val_str = ns.get("final", "") or ns.get("sums", {}).get("final", "")
                     else:
@@ -558,12 +562,12 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                     if ns_val > 0:
                         results["errors"].append({
                             "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                            "message": f"NextSchool: ติด 'มส' แต่มีการกรอกคะแนน{sec_name} ยอดรวม ({ns_val}) ต้องเว้นว่าง"
+                            "message": f"NextSchool: ติด 'มส' แต่มียอดรวมคะแนน{sec_name} ({ns_val}) ต้องเว้นว่าง"
                         })
                         bbox_key = f"{sec}_sum" if sec == "after_mid" else "final"
                         add_highlight("nextschool", ns_page, ns["bboxes"].get(bbox_key), "red")
 
-                    # NextSchool: ตรวจแต่ละช่องย่อย (เฉพาะหลังกลางภาค)
+                    # ช่องย่อย (เฉพาะหลังกลางภาค)
                     if sec == "after_mid":
                         subs = ns.get("subs", {}).get(sec, {})
                         sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
