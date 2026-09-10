@@ -226,24 +226,27 @@ def generate_wp17(pair_results):
         })
         
     # Helper to populate a stats table
-    def populate_table(table, stats_type):
+        def populate_table(table, stats_type):
         sum_total = sum(s["total"] for s in stats_list)
         if sum_total == 0: sum_total = 1 
         
-        # We assume rows 2 to 6 are available for data (5 slots). 
-        # Row 7 is Sum, Row 8 is Pct (index 7 and 8)
-        # If we need more than 5 slots, we add rows at the end.
+        sum_row_idx = -1
+        for i, r in enumerate(table.rows):
+            if "รวม" in r.cells[0].text or "รวม" in r.cells[1].text:
+                sum_row_idx = i
+                break
+        if sum_row_idx == -1: sum_row_idx = len(table.rows) - 2 
         
-        # 1. Fill data
+        blank_start = 2
+        blank_end = sum_row_idx - 1
+        num_blanks = blank_end - blank_start + 1
+        
         for i, stat in enumerate(stats_list):
-            if 2 + i < 7: # fits in blank rows
-                row_cells = table.rows[2 + i].cells
+            if i < num_blanks:
+                row_cells = table.rows[blank_start + i].cells
             else:
-                # Add row before Sum and Pct.
-                # python-docx doesn't have insert_row_before, so we append to end
-                # But since we append, the Sum and Pct rows will be ABOVE the new row.
-                # To fix this, we'll append a row, and SHIFT everything down later.
-                row_cells = table.add_row().cells
+                new_row = table.add_row()
+                row_cells = new_row.cells
                 
             set_cell_text(row_cells[0], str(i + 1))
             set_cell_text(row_cells[1], stat["code_name"])
@@ -252,54 +255,55 @@ def generate_wp17(pair_results):
             if stats_type == "grade":
                 cols = ["4", "3.5", "3", "2.5", "2", "1.5", "1", "0", "ร", "มส"]
                 for j, g in enumerate(cols):
-                    set_cell_text(row_cells[3+j], str(stat["grades"][g]))
+                    if g == "ร":
+                        count = stat["grades"].get("", 0) # Fallback if code maps ร to empty
+                        if "ร" in stat["grades"]: count = stat["grades"]["ร"]
+                    elif g == "มส":
+                        count = stat["grades"].get("มส", 0)
+                        if "มส" not in stat["grades"] and "" in stat["grades"]: count += stat["grades"][""]
+                    else:
+                        count = stat["grades"].get(g, 0)
+                        
+                    set_cell_text(row_cells[3+j], str(count))
             else:
                 cols = ["3", "2", "1", "0"]
                 for j, g in enumerate(cols):
-                    set_cell_text(row_cells[3+j], str(stat["read"][g]))
-                    set_cell_text(row_cells[7+j], str(stat["char"][g]))
+                    set_cell_text(row_cells[3+j], str(stat["read"].get(g, 0)))
+                    set_cell_text(row_cells[7+j], str(stat["char"].get(g, 0)))
                     
-        # 2. Fix the layout
-        # If stats_list > 5, we have new rows at the bottom. We need to swap them with Sum/Pct
-        if len(stats_list) > 5:
-            # Reconstruct the last two rows as Sum and Pct
-            # and move the original Sum (row 7) and Pct (row 8) data up to where it should be?
-            # Actually, simpler: Just rewrite ALL rows from 7 to the end!
-            pass # Too complex to shift elements safely in docx.
-            
-            # The easiest way: read row 7 and 8 values (they are just templates), 
-            # and we overwrite whatever is at the bottom two rows.
-            
-        # Delete unused blank rows (if stats_list < 5)
-        # Rows 2 to 2+len-1 are used.
-        # Unused are 2+len to 6.
-        data_end_idx = 2 + len(stats_list)
-        while data_end_idx < 7 and len(table.rows) > 8:
-            # Delete row at data_end_idx
-            delete_row(table, table.rows[data_end_idx])
-            # We also need to adjust our concept of where Sum and Pct are.
-            # Sum is now at the second to last row, Pct is last row.
-            
-        # 3. Compute Sums and Pct at the LAST two rows
+        if len(stats_list) < num_blanks:
+            for i in range(len(stats_list), num_blanks):
+                # Using our custom delete_row
+                delete_row(table, table.rows[blank_start + i])
+                
+        # Re-compute sum_row and pct_row at the LAST TWO rows of the table
         sum_row = table.rows[-2].cells
         pct_row = table.rows[-1].cells
         
-        set_cell_text(sum_row[1], "รวม")
+        set_cell_text(sum_row[0], "รวม")
+        set_cell_text(sum_row[1], "")
         set_cell_text(sum_row[2], str(sum(s["total"] for s in stats_list)))
-        set_cell_text(pct_row[1], "ร้อยละ")
+        set_cell_text(pct_row[0], "ร้อยละ")
+        set_cell_text(pct_row[1], "")
         set_cell_text(pct_row[2], "100")
         
         if stats_type == "grade":
             cols = ["4", "3.5", "3", "2.5", "2", "1.5", "1", "0", "ร", "มส"]
             for j, g in enumerate(cols):
-                s = sum(stat["grades"][g] for stat in stats_list)
+                if g == "ร":
+                    s = sum(stat["grades"].get("ร", stat["grades"].get("", 0)) for stat in stats_list)
+                elif g == "มส":
+                    s = sum(stat["grades"].get("มส", stat["grades"].get("", 0)) for stat in stats_list)
+                else:
+                    s = sum(stat["grades"].get(g, 0) for stat in stats_list)
+                    
                 set_cell_text(sum_row[3+j], str(s))
                 set_cell_text(pct_row[3+j], f"{(s/sum_total)*100:.2f}")
         else:
             cols = ["3", "2", "1", "0"]
             for j, g in enumerate(cols):
-                sr = sum(stat["read"][g] for stat in stats_list)
-                sc = sum(stat["char"][g] for stat in stats_list)
+                sr = sum(stat["read"].get(g, 0) for stat in stats_list)
+                sc = sum(stat["char"].get(g, 0) for stat in stats_list)
                 set_cell_text(sum_row[3+j], str(sr))
                 set_cell_text(pct_row[3+j], f"{(sr/sum_total)*100:.2f}")
                 set_cell_text(sum_row[7+j], str(sc))
