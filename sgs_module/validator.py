@@ -236,7 +236,9 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
 
         # 2. Consistency & Strict Checks on SGS (Only for final)
         if round_type == "final":
-            grade = str(sgs.get("grade", ""))
+            grade = str(sgs.get("grade", "")).strip()
+            if grade.endswith(".0"):
+                grade = grade[:-2]
             
             # check ONLY items 3, 4, 6 (indices 2, 3, 5) for Consistency
             check_indices = {2, 3, 5}
@@ -535,8 +537,12 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "red")
 
                     if ns_grade_raw == "มส":
-                        ns_key = f"{sec}_sum" if sec == "after_mid" else "final"
-                        ns_val_str = ns.get("sums", {}).get(ns_key, ns.get("final", "0"))
+                        if sec == "final":
+                            ns_val_str = ns.get("final", "0")
+                            if not ns_val_str or ns_val_str == "0":
+                                ns_val_str = ns.get("sums", {}).get("final", "0")
+                        else:
+                            ns_val_str = ns.get("sums", {}).get(f"{sec}_sum", "0")
                         try: ns_val = float(ns_val_str) if ns_val_str else 0
                         except ValueError: ns_val = 0
                         if ns_val > 0:
