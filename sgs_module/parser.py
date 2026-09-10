@@ -176,6 +176,8 @@ def parse_nextschool_excel(file_content, filename):
         col_mapping = {}
         nextschool_mapping = {}
         current_section = None
+        total_col_idx = -1   # คอลัมน์ "รวม" (grand total)
+        grade_col_idx = -1   # คอลัมน์ "ผลการเรียน"
         
         def has_kw(val, keywords):
             clean_v = str(val).replace('\n', '').replace(' ', '')
@@ -230,7 +232,15 @@ def parse_nextschool_excel(file_content, filename):
                     nextschool_mapping[current_section]["sub_cols"].append(j)
                     if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
                         max_scores[f"{current_section}_sub_{j}"] = float(row1[j])
-        
+            else:
+                # ไม่ได้อยู่ใน section ใด → ตรวจหาคอลัมน์ รวม (grand total) และ ผลการเรียน
+                total_kws = ["รวม"]
+                grade_kws = ["ผลการเรียน", "เกรด", "ผล"]
+                if has_kw(full_header, total_kws) and total_col_idx == -1:
+                    total_col_idx = j
+                if has_kw(full_header, grade_kws) and grade_col_idx == -1:
+                    grade_col_idx = j
+
         # Auto-sum max_scores if sum column is missing
         for sec in ["before_mid", "after_mid", "mid", "final"]:
             sum_key = f"{sec}_sum"
@@ -252,11 +262,25 @@ def parse_nextschool_excel(file_content, filename):
                     student_id = student_id[:-2]
                     
                 student_name = str(row[2]).strip()
+                
+                # ใช้ column index ที่หาได้จาก header
+                # ถ้าหาไม่เจอ → ใช้คอลัมน์สุดท้าย (grade) และก่อนสุดท้าย (total) เป็น fallback
+                _total_idx = total_col_idx if total_col_idx >= 0 else (len(row) - 2)
+                _grade_idx = grade_col_idx if grade_col_idx >= 0 else (len(row) - 1)
+                
+                def _get_cell(r, idx):
+                    if idx < 0 or idx >= len(r):
+                        return ""
+                    val = r[idx]
+                    if isinstance(val, float) and math.isnan(val):
+                        return ""
+                    return str(val).strip()
+                
                 student_data = {
                     "student_id": student_id,
                     "name": student_name,
-                    "total": str(row[18]).strip() if len(row) > 18 else "",
-                    "grade": str(row[19]).strip() if len(row) > 19 else "",
+                    "total": _get_cell(row, _total_idx),
+                    "grade": _get_cell(row, _grade_idx),
                     "sums": {},
                     "subs": {
                         "before_mid": {},
@@ -264,7 +288,10 @@ def parse_nextschool_excel(file_content, filename):
                         "mid": {},
                         "final": {}
                     },
-                    "bboxes": {},
+                    "bboxes": {
+                        "total": {"col_idx": _total_idx},
+                        "grade": {"col_idx": _grade_idx},
+                    },
                     "row_idx": i # To reference the HTML table row
                 }
                 
