@@ -220,13 +220,6 @@ def parse_nextschool_excel(file_content, filename):
                     elif j < len(row2) and not (isinstance(row2[j], float) and math.isnan(row2[j])):
                         max_scores[f"{current_section}_sum"] = float(row2[j])
                     current_section = None # end of section
-                elif "สอบ" in sub_name or current_section in ["mid", "final"]:
-                    col_mapping[f"{current_section}_sum"] = j
-                    nextschool_mapping[current_section]["sum_idx"] = j
-                    if j < len(row1) and not (isinstance(row1[j], float) and math.isnan(row1[j])):
-                        max_scores[f"{current_section}_sum"] = float(row1[j])
-                    elif j < len(row2) and not (isinstance(row2[j], float) and math.isnan(row2[j])):
-                        max_scores[f"{current_section}_sum"] = float(row2[j])
                 else:
                     col_mapping[f"{current_section}_sub_{j}"] = j
                     nextschool_mapping[current_section]["sub_cols"].append(j)
