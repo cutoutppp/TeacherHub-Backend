@@ -441,6 +441,30 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             })
                             add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sum"), "red")
 
+                            # Check NextSchool Subs for Rule 6.1
+                            subs = ns.get("subs", {}).get(sec, {})
+                            sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
+                            for i_sub, (sub_idx, sub_val_str) in enumerate(sorted_subs_items):
+                                unit_num = i_sub + 1
+                                full_sub = ns_max_scores.get(f"{sec}_sub_{sub_idx}")
+                                if full_sub:
+                                    try:
+                                        val_sub = float(sub_val_str)
+                                        if val_sub < (full_sub / 2):
+                                            try:
+                                                header_name = find_header_name(ns_grid, int(sub_idx))
+                                                display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
+                                            except (ValueError, IndexError):
+                                                display_name = f"หน่วยที่ {unit_num}"
+                                            
+                                            results["errors"].append({
+                                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                                "message": f"NextSchool: เกรด {grade} ช่องย่อย {display_name} ({sec_name}) ได้ ({val_sub}) ไม่ผ่านครึ่งของ {full_sub}"
+                                            })
+                                            add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sub_{sub_idx}"), "red")
+                                    except ValueError:
+                                        pass
+
             # Rule 6.2: ติด ร ต้องมีคะแนนบ้างไม่ใช่โล่งทั้งหมด
             if grade == "ร":
                 sgs_total_str = sgs.get("total", "0")
