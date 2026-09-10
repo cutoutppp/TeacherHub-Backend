@@ -255,8 +255,8 @@ def parse_nextschool_excel(file_content, filename):
                 student_data = {
                     "student_id": student_id,
                     "name": student_name,
-                    "total": str(row[18]).strip() if len(row) > 18 else "",
-                    "grade": str(row[19]).strip() if len(row) > 19 else "",
+                    "total": str(row[17]).strip() if len(row) > 17 else "",
+                    "grade": str(row[18]).strip() if len(row) > 18 else "",
                     "sums": {},
                     "subs": {
                         "before_mid": {},
