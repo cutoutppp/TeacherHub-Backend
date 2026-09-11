@@ -317,14 +317,11 @@ async def api_export_wp17_saved(request: Request):
                         "subject_group": data.get("subject_group", "")
                     },
                     "raw_data": {
-                        "sgs_students": {
-                           "1": {"student_id": "10001", "grade": "4.0", "attributes": "3", "reading": "3", "char_scores": [3,3,3], "comp_scores": [3,3,3]},
-                           "2": {"student_id": "10002", "grade": "3.5", "attributes": "3", "reading": "3", "char_scores": [3,3,3], "comp_scores": [3,3,3]}
-                        }
+                        "sgs_students": {}
                     }
                 })
         elif not rooms:
-            rooms = _get_fallback_demo_rooms(teacher_name)
+            rooms = []
             
         doc_bytes = generate_wp17(rooms)
         if not doc_bytes:
