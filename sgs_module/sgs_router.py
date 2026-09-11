@@ -331,10 +331,11 @@ async def api_export_wp17_saved(request: Request):
             raise HTTPException(status_code=404, detail="Template not found")
             
         filename = f"WP17_{subject_code}.docx" if subject_code else f"WP17_{teacher_name}.docx"
+        encoded_fn = quote(filename)
         return Response(
             content=doc_bytes,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
