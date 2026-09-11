@@ -226,7 +226,7 @@ def generate_wp17(pair_results):
         })
         
     # Helper to populate a stats table
-        def populate_table(table, stats_type):
+    def populate_table(table, stats_type):
         sum_total = sum(s["total"] for s in stats_list)
         if sum_total == 0: sum_total = 1 
         
