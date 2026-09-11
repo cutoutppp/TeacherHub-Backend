@@ -272,9 +272,10 @@ def generate_wp17(pair_results):
                     set_cell_text(row_cells[7+j], str(stat["char"].get(g, 0)))
                     
         if len(stats_list) < num_blanks:
-            for i in range(len(stats_list), num_blanks):
-                # Using our custom delete_row
-                delete_row(table, table.rows[blank_start + i])
+            # Delete in reverse order so index doesn't shift after each deletion
+            for i in range(num_blanks - 1, len(stats_list) - 1, -1):
+                row_to_del = table.rows[blank_start + i]
+                delete_row(table, row_to_del)
                 
         # Re-compute sum_row and pct_row at the LAST TWO rows of the table
         sum_row = table.rows[-2].cells
