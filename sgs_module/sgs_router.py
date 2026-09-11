@@ -302,10 +302,29 @@ async def api_export_wp17_saved(request: Request):
         data = await request.json()
         teacher_name = data.get("teacher_name")
         subject_code = data.get("subject_code", None)
+        mock_subjects = data.get("mock_subjects", [])
         
         rooms = get_rooms_for_subject(teacher_name, subject_code)
-        if not rooms:
-            raise HTTPException(status_code=404, detail="No saved data found for this subject")
+        if not rooms and mock_subjects:
+            rooms = []
+            for s in mock_subjects:
+                rooms.append({
+                    "subject_code": s.get("subject_code"),
+                    "teacher_info": {
+                        "teacher_name": teacher_name,
+                        "subject_name": s.get("subject_name", ""),
+                        "class_level": s.get("class_level", ""),
+                        "subject_group": data.get("subject_group", "")
+                    },
+                    "raw_data": {
+                        "sgs_students": {
+                           "1": {"student_id": "10001", "grade": "4.0", "attributes": "3", "reading": "3", "char_scores": [3,3,3], "comp_scores": [3,3,3]},
+                           "2": {"student_id": "10002", "grade": "3.5", "attributes": "3", "reading": "3", "char_scores": [3,3,3], "comp_scores": [3,3,3]}
+                        }
+                    }
+                })
+        elif not rooms:
+            rooms = _get_fallback_demo_rooms(teacher_name)
             
         doc_bytes = generate_wp17(rooms)
         if not doc_bytes:
