@@ -20,24 +20,35 @@ def _save_wp16_db(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
     try:
         rows = list(data.values())
+        thai_col_map = {
+            'special_id': 'เลขเฉพาะ',
+            'academic_year': 'ปีการศึกษา',
+            'semester': 'ภาคเรียน',
+            'subject_code': 'รหัสวิชา',
+            'subject_name': 'ชื่อวิชา',
+            'teacher_name': 'ครูผู้สอน',
+            'class_level': 'ชั้น/ห้อง',
+            'student_id': 'เลขประจำตัว',
+            'student_name': 'ชื่อ-นามสกุล',
+            'old_score': 'คะแนนเดิม',
+            'old_grade': 'ผลการเรียนเดิม',
+            'pending_task': 'งานค้าง',
+            'remark': 'หมายเหตุ',
+            'updated_at': 'วันที่บันทึก'
+        }
+        preferred_cols = list(thai_col_map.keys())
         if rows:
             df = pd.DataFrame(rows)
-            preferred_cols = [
-                'special_id', 'academic_year', 'semester', 'subject_code', 'subject_name',
-                'teacher_name', 'class_level', 'student_id', 'student_name',
-                'old_score', 'old_grade', 'pending_task', 'remark', 'updated_at'
-            ]
-            actual_cols = [c for c in preferred_cols if c in df.columns] + [c for c in df.columns if c not in preferred_cols]
-            df = df[actual_cols]
-            df.to_excel(WP16_EXCEL_FILE, index=False)
+            for col in preferred_cols:
+                if col not in df.columns:
+                    df[col] = ''
+            df = df[preferred_cols]
+            df = df.rename(columns=thai_col_map)
         else:
-            preferred_cols = [
-                'special_id', 'academic_year', 'semester', 'subject_code', 'subject_name',
-                'teacher_name', 'class_level', 'student_id', 'student_name',
-                'old_score', 'old_grade', 'pending_task', 'remark', 'updated_at'
-            ]
-            df = pd.DataFrame(columns=preferred_cols)
-            df.to_excel(WP16_EXCEL_FILE, index=False)
+            df = pd.DataFrame(columns=[thai_col_map[c] for c in preferred_cols])
+            
+        with pd.ExcelWriter(WP16_EXCEL_FILE, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='WP16_งานค้าง', index=False)
     except Exception as e:
         print(f'Error syncing to origin excel: {e}')
 
@@ -52,8 +63,10 @@ def save_pending_tasks(teacher_name, subject_code, subject_name, tasks_list, aca
         incoming_task = item.get('pending_task', '')
         # If incoming task is empty, keep existing if present
         final_task = incoming_task if (incoming_task and incoming_task.strip()) else existing.get('pending_task', '')
-        final_remark = item.get('remark', '') or existing.get('remark', '')
         is_manual = item.get('is_manual', False) or existing.get('is_manual', False)
+        final_remark = item.get('remark', '') or existing.get('remark', '')
+        if is_manual and not final_remark:
+            final_remark = '[เพิ่มเอง]'
 
         db[special_id] = {
             'special_id': special_id,

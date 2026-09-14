@@ -7,7 +7,7 @@ import base64
 from .parser import parse_sgs_pdf, parse_nextschool_excel
 from .validator import validate_scores
 from .doc_generator import generate_wp16, generate_wp17, generate_wp25, generate_wp25_group
-from .work_db import get_works_for_teacher, add_work, get_rooms_for_subject, get_rooms_for_group
+from .work_db import get_works_for_teacher, add_work, get_rooms_for_subject, get_rooms_for_group, remove_student_from_work_db
 from .score_db import load_scores_from_json
 from .wp16_db import save_pending_tasks, get_pending_tasks_for_subject, get_all_pending_tasks, WP16_EXCEL_FILE, sync_all_accumulated_tasks_to_gas, remove_pending_task
 import re
@@ -280,24 +280,37 @@ async def api_save_work(request: Request):
         for pair_data in pairs:
             if not pair_data:
                 continue
+            sgs_info = pair_data.get("sgs") or {}
             teacher_info = pair_data.get("teacher_info") or {}
-            teacher_name = pair_data.get("teacher_name") or teacher_info.get("teacher_name", "Unknown Teacher")
-            subject_code = pair_data.get("subject_code") or teacher_info.get("subject_code", "Unknown Subject")
-            class_level = pair_data.get("class_level") or teacher_info.get("class_level", "Unknown Class")
-            subject_name = pair_data.get("subject_name") or teacher_info.get("subject_name", "")
+            teacher_name = data.get("teacher_name") or pair_data.get("teacher_name") or teacher_info.get("teacher_name") or sgs_info.get("teacher_name", "Unknown Teacher")
+            subject_code = pair_data.get("subject_code") or teacher_info.get("subject_code") or sgs_info.get("subject_code", "Unknown Subject")
+            class_level = pair_data.get("class_level") or teacher_info.get("class_level") or sgs_info.get("grade_level", "Unknown Class")
+            subject_name = pair_data.get("subject_name") or teacher_info.get("subject_name") or sgs_info.get("subject_name", "")
             
             # Save to work_db
             add_work(teacher_name, subject_code, class_level, pair_data)
             
-            # Auto-extract failing students (0, ร, มส, มผ)
+            # Auto-extract failing students (0, ร, มส, มผ) or manual additions
             raw = pair_data.get("raw_data") or {}
             sgs_students = raw.get("sgs_students") or {}
             failing_list = []
-            for sid, s in sgs_students.items():
+            
+            if isinstance(sgs_students, list):
+                sgs_iter = [(s.get("student_id", ""), s) for s in sgs_students]
+            elif isinstance(sgs_students, dict):
+                sgs_iter = list(sgs_students.items())
+            else:
+                sgs_iter = []
+                
+            for sid, s in sgs_iter:
+                sid = str(sid or s.get("student_id", "")).strip()
+                if not sid:
+                    continue
                 grade = str(s.get("grade", "")).strip()
                 if grade.endswith(".0"):
                     grade = grade[:-2]
-                if grade in ["0", "ร", "มส", "มผ"]:
+                is_man = bool(s.get("is_manual", False))
+                if grade in ["0", "ร", "มส", "มผ"] or is_man:
                     s_name = s.get("name", "")
                     if not s_name:
                         s_name = (s.get("prefix", "") + s.get("firstname", "") + " " + s.get("lastname", "")).strip()
@@ -305,11 +318,12 @@ async def api_save_work(request: Request):
                         "student_id": sid,
                         "student_name": s_name,
                         "class_level": class_level,
-                        "old_score": str(s.get("total", "") or s.get("score", "")),
+                        "old_score": str(s.get("total", "") or s.get("score", "") or s.get("raw_score", "")),
                         "old_grade": grade,
-                        "pending_task": "",
+                        "pending_task": s.get("pending_task", ""),
                         "academic_year": academic_year,
-                        "semester": semester
+                        "semester": semester,
+                        "is_manual": is_man
                     })
             if failing_list:
                 save_pending_tasks(teacher_name, subject_code, subject_name, failing_list, academic_year, semester)
@@ -363,7 +377,7 @@ async def api_export_wp17_saved(request: Request):
 
 
 @router.get("/api/wp16/students")
-async def api_get_wp16_students(teacher_name: str, subject_code: str):
+async def api_get_wp16_students(subject_code: str, teacher_name: str = ""):
     try:
         rooms = get_rooms_for_subject(teacher_name, subject_code)
         existing_tasks = get_pending_tasks_for_subject(subject_code, teacher_name)
@@ -380,9 +394,11 @@ async def api_get_wp16_students(teacher_name: str, subject_code: str):
             
             raw = r.get("raw_data") or {}
             sgs_students = raw.get("sgs_students") or {}
+            sgs_iter = [(s.get("student_id", ""), s) for s in sgs_students] if isinstance(sgs_students, list) else (sgs_students.items() if isinstance(sgs_students, dict) else [])
             
-            for sid, s in sgs_students.items():
-                if sid in seen_sids:
+            for sid, s in sgs_iter:
+                sid = str(sid or s.get("student_id", "")).strip()
+                if not sid or sid in seen_sids:
                     continue
                 grade = str(s.get("grade", "")).strip()
                 if grade.endswith(".0"): grade = grade[:-2]
@@ -396,7 +412,7 @@ async def api_get_wp16_students(teacher_name: str, subject_code: str):
                         "student_id": sid,
                         "student_name": s_name,
                         "class_level": c_level,
-                        "old_score": str(s.get("total", "") or s.get("score", "")),
+                        "old_score": str(s.get("total", "") or s.get("score", "") or s.get("raw_score", "")),
                         "old_grade": grade,
                         "pending_task": old_task.get("pending_task", ""),
                         "remark": old_task.get("remark", ""),
@@ -438,8 +454,10 @@ async def api_get_wp16_students(teacher_name: str, subject_code: str):
                 subject_counts[scode] = 0
                 subject_seen[scode] = set()
             sgs_stus = (r.get("raw_data") or {}).get("sgs_students") or {}
-            for sid, s in sgs_stus.items():
-                if sid in subject_seen[scode]: continue
+            sgs_iter = [(s.get("student_id", ""), s) for s in sgs_stus] if isinstance(sgs_stus, list) else (sgs_stus.items() if isinstance(sgs_stus, dict) else [])
+            for sid, s in sgs_iter:
+                sid = str(sid or s.get("student_id", "")).strip()
+                if not sid or sid in subject_seen[scode]: continue
                 grade = str(s.get("grade", "")).strip()
                 if grade.endswith(".0"): grade = grade[:-2]
                 if grade in ["0", "ร", "มส", "มผ"]:
@@ -475,8 +493,45 @@ async def api_get_wp16_students(teacher_name: str, subject_code: str):
 @router.delete("/api/wp16/student")
 async def api_delete_wp16_student(subject_code: str, student_id: str):
     try:
-        success = remove_pending_task(subject_code, student_id)
-        return {"status": "success" if success else "not_found"}
+        s1 = remove_pending_task(subject_code, student_id)
+        s2 = remove_student_from_work_db(subject_code, student_id)
+        return {"status": "success" if (s1 or s2) else "not_found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/wp16/student")
+async def api_add_wp16_student(request: Request):
+    try:
+        data = await request.json()
+        teacher_name = data.get("teacher_name", "")
+        subject_code = data.get("subject_code", "")
+        subject_name = data.get("subject_name", "")
+        academic_year = str(data.get("academic_year", "2569"))
+        semester = str(data.get("semester", "1"))
+        student = data.get("student", {})
+        
+        if not student or not student.get("student_id"):
+            raise HTTPException(status_code=400, detail="Missing student data or student_id")
+            
+        student["is_manual"] = True
+        save_pending_tasks(teacher_name, subject_code, subject_name, [student], academic_year, semester)
+        return {"status": "success", "message": "Saved student to sheet"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/wp16/save")
+async def api_save_wp16_tasks(request: Request):
+    try:
+        data = await request.json()
+        teacher_name = data.get("teacher_name", "")
+        subject_code = data.get("subject_code", "")
+        subject_name = data.get("subject_name", "")
+        academic_year = str(data.get("academic_year", "2569"))
+        semester = str(data.get("semester", "1"))
+        students = data.get("students", [])
+        
+        save_pending_tasks(teacher_name, subject_code, subject_name, students, academic_year, semester)
+        return {"status": "success", "count": len(students)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

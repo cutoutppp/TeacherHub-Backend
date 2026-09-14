@@ -61,3 +61,25 @@ def get_rooms_for_group(group_name=None, teacher_names=None):
             all_rooms.extend([v["data"] for v in subj_data.values()])
     return all_rooms
 
+def remove_student_from_work_db(subject_code, student_id, teacher_name=None):
+    db = _load_db()
+    changed = False
+    for t_name, teacher_data in db.items():
+        if teacher_name and t_name != teacher_name:
+            continue
+        if subject_code in teacher_data:
+            for c_level, room_obj in teacher_data[subject_code].items():
+                raw = room_obj.get("data", {}).get("raw_data", {})
+                sgs_stus = raw.get("sgs_students")
+                if isinstance(sgs_stus, dict) and student_id in sgs_stus:
+                    del sgs_stus[student_id]
+                    changed = True
+                elif isinstance(sgs_stus, list):
+                    orig_len = len(sgs_stus)
+                    raw["sgs_students"] = [s for s in sgs_stus if str(s.get("student_id", "")).strip() != str(student_id).strip()]
+                    if len(raw["sgs_students"]) != orig_len:
+                        changed = True
+    if changed:
+        _save_db(db)
+    return changed
+
