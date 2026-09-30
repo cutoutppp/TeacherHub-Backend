@@ -5,3 +5,5 @@ __pycache__/
 test_output_*.docx
 old_*.py
 scratch_*.txt
+*.xlsx
+*.xls
