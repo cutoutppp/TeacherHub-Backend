@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+test_output_*.docx
+old_*.py
+scratch_*.txt

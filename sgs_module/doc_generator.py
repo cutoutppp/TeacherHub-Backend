@@ -10,11 +10,15 @@ def set_cell_text(cell, text):
         cell.add_paragraph()
     p = cell.paragraphs[0]
     p.text = ""
-    run = p.add_run(text)
-    run.font.name = "TH Sarabun PSK"
-    run.font.size = Pt(16)
-    r = run._element
-    r.rPr.rFonts.set(qn('w:eastAsia'), 'TH Sarabun PSK')
+    lines = str(text or "").split("\n")
+    for idx, line in enumerate(lines):
+        if idx > 0:
+            p.add_run().add_break()
+        run = p.add_run(line)
+        run.font.name = "TH Sarabun PSK"
+        run.font.size = Pt(16)
+        r = run._element
+        r.rPr.rFonts.set(qn('w:eastAsia'), 'TH Sarabun PSK')
 
 def delete_row(table, row):
     try:
@@ -29,120 +33,112 @@ def get_mode(scores):
     mapped = [mapping.get(s, s) for s in valid]
     return max(set(mapped), key=mapped.count)
 
-def generate_wp16(pair_results):
-    template_path = "วผ16 บันทึกข้อความรายงาน 0 ร มผ.docx"
+def generate_wp16(pair_results=None, subject_code="", subject_name="", teacher_name="", students=None, term="2", year="2568"):
+    template_path = "template_wp16_single.docx"
+    if not os.path.exists(template_path):
+        template_path = os.path.join(os.path.dirname(__file__), "..", "template_wp16_single.docx")
+    if not os.path.exists(template_path):
+        template_path = "วผ16 บันทึกข้อความรายงาน 0 ร มผ.docx"
+    if not os.path.exists(template_path):
+        template_path = os.path.join(os.path.dirname(__file__), "..", "วผ16 บันทึกข้อความรายงาน 0 ร มผ.docx")
+        
     if os.path.exists(template_path):
         doc = Document(template_path)
-    elif os.path.exists(os.path.join("..", template_path)):
-        doc = Document(os.path.join("..", template_path))
     else:
         doc = Document()
         doc.add_heading('รายงาน 0 ร มผ (วผ.16)', 0)
 
-    all_failing_students = []
-    subject_codes = set()
-    subject_names = set()
+    failing_students = []
     
-    for pair in pair_results:
-        code = pair.get("subject_code", "")
-        subject_codes.add(code)
-        teacher = pair.get("teacher_info")
-        class_level = teacher.get("class_level", "") if teacher else ""
-        if teacher: subject_names.add(teacher.get("subject_name", ""))
-            
-        raw = pair.get("raw_data", {})
-        sgs_students = raw.get("sgs_students", {})
-        ns_students = raw.get("nextschool_students", {})
-        results = pair.get("results", {})
-        at_risk = results.get("at_risk_students", [])
-        
-        seen_sids = set()
-        
-        for student in at_risk:
-            sid = student.get("id")
-            if sid in seen_sids: continue
-            seen_sids.add(sid)
-            
-            sgs = sgs_students.get(sid, {})
-            ns = ns_students.get(sid, {})
-            
-            grade = str(sgs.get("grade", "")).strip() or str(ns.get("grade", "")).strip()
-            if grade.endswith(".0"):
-                grade = grade[:-2]
-            
-            # WP16 should ONLY include students who actually failed (0, ร, มส, มผ), not just those who got less than half score
-            if grade not in ["0", "ร", "มส", "มผ"]:
+    if students is not None:
+        failing_students = list(students)
+    elif pair_results:
+        for pair in pair_results:
+            code = pair.get("subject_code", "")
+            if subject_code and code != subject_code:
                 continue
+            teacher = pair.get("teacher_info") or {}
+            class_level = teacher.get("class_level", "")
+            if not subject_name:
+                subject_name = teacher.get("subject_name", "")
+            if not teacher_name:
+                teacher_name = teacher.get("teacher_name", "")
                 
-            total = str(sgs.get("total", "")).strip() or str(ns.get("total", "")).strip()
-            name = student.get("name") or ns.get("name") or sgs.get("name", "")
-            
-            missing_works = []
-            period_names = {
-                "before_mid": "ก่อนกลางภาค",
-                "mid": "กลางภาค",
-                "after_mid": "หลังกลางภาค",
-                "final": "ปลายภาค"
-            }
-            for period in ["before_mid", "mid", "after_mid", "final"]:
-                subs = ns.get("subs", {}).get(period, {})
-                sorted_subs = sorted(subs.items(), key=lambda x: int(x[0]))
-                for i, (sub_idx, sub_val) in enumerate(sorted_subs):
-                    unit_num = i + 1
-                    try:
-                        header_name = find_header_name(ns_grid, int(sub_idx))
-                        display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
-                    except (ValueError, IndexError):
-                        display_name = f"หน่วยที่ {unit_num}"
-                        
-                    try:
-                        if float(sub_val) == 0: missing_works.append(f"{display_name} ({period_names[period]})")
-                    except ValueError:
-                        if not str(sub_val).strip(): missing_works.append(f"{display_name} ({period_names[period]})")
-            
-            if missing_works:
-                missing_text = ", ".join(missing_works)
-            else:
-                missing_text = "สอบแก้ตัว"
-                
-            all_failing_students.append({
-                "class": class_level,
-                "name": name,
-                "score": total,
-                "grade": grade,
-                "missing": missing_text
-            })
-    for para in doc.paragraphs:
-        if "ในรหัสวิชา" in para.text or "รายวิชา" in para.text:
-            if "รหัสวิชา............................" in para.text:
-                para.text = para.text.replace("รหัสวิชา............................", f"รหัสวิชา {', '.join(subject_codes)}")
-            if "รายวิชา................................................" in para.text:
-                para.text = para.text.replace("รายวิชา................................................", f"รายวิชา {', '.join(subject_names)}")
-            if "จำนวนทั้งสิ้น.............................." in para.text:
-                para.text = para.text.replace("จำนวนทั้งสิ้น..............................", f"จำนวนทั้งสิ้น {len(all_failing_students)}")
-            
+            raw = pair.get("raw_data", {})
+            sgs_students = raw.get("sgs_students", {})
+            for sid, sgs in sgs_students.items():
+                grade = str(sgs.get("grade", "")).strip()
+                if grade.endswith(".0"): grade = grade[:-2]
+                if grade in ["0", "ร", "มส", "มผ"]:
+                    score = str(sgs.get("total", ""))
+                    name = sgs.get("name", "")
+                    failing_students.append({
+                        "student_id": sid,
+                        "class_level": class_level,
+                        "name": name,
+                        "score": score,
+                        "grade": grade,
+                        "pending_task": "สอบแก้ตัว",
+                        "remark": ""
+                    })
+
+    count_students = len(failing_students)
+
+    for p in doc.paragraphs:
+        if "รายงานข้อมูลการให้ผลการเรียน" in p.text:
+            p.text = f"เรื่อง  รายงานข้อมูลการให้ผลการเรียน o, ร, มส, มผ ภาคเรียนที่ {term}  ปีการศึกษา {year}"
+            if len(p.runs) > 0:
+                p.runs[0].font.name = "TH Sarabun PSK"
+                p.runs[0].font.size = Pt(16)
+        elif "มีนักเรียนที่ปฏิบัติตามเงื่อนไขของการเรียนไม่ครบถ้วน" in p.text:
+            p.text = f" ด้วยในภาคเรียนที่ {term} ปีการศึกษา {year} มีนักเรียนที่ปฏิบัติตามเงื่อนไขของการเรียนไม่ครบถ้วน จึงเห็นควรให้ได้ผลการเรียน o, ร, มส, มผ ในรหัสวิชา {subject_code} รายวิชา{subject_name} จำนวนทั้งสิ้น {count_students} คน"
+            if len(p.runs) > 0:
+                p.runs[0].font.name = "TH Sarabun PSK"
+                p.runs[0].font.size = Pt(16)
+
+    # Update teacher name only right after 'ครูประจำวิชา'
+    for idx, p in enumerate(doc.paragraphs):
+        if "ครูประจำวิชา" in p.text:
+            # The next paragraph is the teacher's name
+            if idx + 1 < len(doc.paragraphs) and teacher_name:
+                doc.paragraphs[idx + 1].text = f"                                    ({teacher_name})"
+                if len(doc.paragraphs[idx + 1].runs) > 0:
+                    doc.paragraphs[idx + 1].runs[0].font.name = "TH Sarabun PSK"
+                    doc.paragraphs[idx + 1].runs[0].font.size = Pt(16)
+            break
+
+
     if doc.tables:
         table = doc.tables[0]
-        # Template has headers at 0, blanks at 1-10. We overwrite blanks.
-        for i, stud in enumerate(all_failing_students):
+        for i, stud in enumerate(failing_students):
             if i + 1 < len(table.rows):
                 row_cells = table.rows[i + 1].cells
             else:
                 row_cells = table.add_row().cells
-                
+
+            c_raw = str(stud.get("class_level", "")).strip()
+            import re
+            c_cleaned = re.sub(r'^(ม\.\s*)+', '', c_raw)
+            c_cleaned = re.sub(r'^(ม\s*)+', '', c_cleaned)
+            c_level = f"ม.{c_cleaned}" if c_cleaned else ""
+            s_name = stud.get("student_name") or stud.get("name", "")
+            s_score = str(stud.get("old_score") if stud.get("old_score") is not None else stud.get("score", ""))
+            s_grade = str(stud.get("old_grade") if stud.get("old_grade") is not None else stud.get("grade", ""))
+            s_task = str(stud.get("pending_task", "") or "สอบแก้ตัว")
+            s_remark = str(stud.get("remark", ""))
+
             set_cell_text(row_cells[0], str(i + 1))
-            set_cell_text(row_cells[1], stud["class"])
-            set_cell_text(row_cells[2], stud["name"])
-            set_cell_text(row_cells[3], str(stud["score"]))
-            set_cell_text(row_cells[4], stud["grade"])
-            set_cell_text(row_cells[5], stud["missing"])
-            set_cell_text(row_cells[6], "")
-            
-        # Delete unused blank rows (from i+2 to end of table)
-        used_rows = len(all_failing_students) + 1 # +1 for header
+            set_cell_text(row_cells[1], c_level)
+            set_cell_text(row_cells[2], s_name)
+            set_cell_text(row_cells[3], s_score)
+            set_cell_text(row_cells[4], s_grade)
+            set_cell_text(row_cells[5], s_task)
+            set_cell_text(row_cells[6], s_remark)
+
+        used_rows = count_students + 1
         while len(table.rows) > used_rows:
             delete_row(table, table.rows[-1])
-            
+
     file_stream = io.BytesIO()
     doc.save(file_stream)
     file_stream.seek(0)

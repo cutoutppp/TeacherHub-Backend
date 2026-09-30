@@ -1,7 +1,52 @@
 import re
+import os
+import json
 from .score_db import get_expected_scores
 
-def validate_scores(sgs_data, nextschool_data, round_type="final"):
+_OFFICIAL_MS_CACHE = None
+
+def _load_official_ms():
+    global _OFFICIAL_MS_CACHE
+    if _OFFICIAL_MS_CACHE is not None:
+        return _OFFICIAL_MS_CACHE
+    
+    cur_dir = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(cur_dir, "official_ms_list.json"),
+        os.path.join(os.path.dirname(cur_dir), "official_ms_list.json"),
+        os.path.join(cur_dir, "..", "..", "AssessmentHub", "SgsNextschool", "backend", "official_ms_list.json")
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    _OFFICIAL_MS_CACHE = json.load(f)
+                    return _OFFICIAL_MS_CACHE
+            except Exception:
+                pass
+    _OFFICIAL_MS_CACHE = {"ms_records": {}, "allowed_exemptions": {}}
+    return _OFFICIAL_MS_CACHE
+
+def find_header_name(grid, col_idx):
+    for row_key in ["row0", "row1", "row2", "row3", "cols"]:
+        row = grid.get(row_key, [])
+        if col_idx < len(row):
+            val = str(row[col_idx]).strip()
+            if val and val.lower() != "nan" and not val.startswith("Unnamed:"):
+                try:
+                    float(val)
+                except ValueError:
+                    return val
+    return ""
+
+def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None):
+    if ms_list is None:
+        ms_list = set()
+    
+    official_ms_db = _load_official_ms()
+    official_ms_records = official_ms_db.get("ms_records", {})
+    allowed_exemptions = official_ms_db.get("allowed_exemptions", {})
+    subj_code = (sgs_data.get("subject_code") or nextschool_data.get("subject_code") or "").strip()
     results = {
         "precheck_passed": False,
         "precheck_message": "",
@@ -14,6 +59,8 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
         "missing_students": [],
         "at_risk_students": []
     }
+    
+    ns_grid = nextschool_data.get("grid", {})
     
     def check_decimal(val_str):
         if not val_str or "." not in str(val_str):
@@ -85,8 +132,8 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
             # Check Subunits
             if key in ["before_mid", "after_mid"]:
                 expected_subs = expected_scores.get(f"{key}_subs", [])
-                ns_mapping = nextschool_data.get("mapping", {}).get(key, {})
-                sub_cols = ns_mapping.get("sub_cols", [])
+                ns_mapping_key = nextschool_data.get("mapping", {}).get(key, {})
+                sub_cols = ns_mapping_key.get("sub_cols", [])
                 
                 # Check up to the number of expected subunits or available columns
                 for i in range(max(len(expected_subs), len(sub_cols))):
@@ -128,7 +175,12 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
         sgs = sgs_students.get(sid)
         ns = next_students.get(sid)
         
-        name = ns.get("name") if ns else (sgs.get("name") if sgs else "Unknown")
+        if ns and ns.get("name"):
+            name = ns.get("name")
+        elif sgs and sgs.get("name"):
+            name = "(ไม่พบข้อมูลชื่อ)" 
+        else:
+            name = "(ไม่พบข้อมูลชื่อ)"
         
         if not sgs or not ns:
             results["warnings"].append({
@@ -150,6 +202,13 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
         score_keys = ["before_mid", "mid", "after_mid", "final"]
         if round_type == "midterm":
             score_keys = ["before_mid", "mid"]
+            
+        period_names = {
+            "before_mid": "ก่อนกลางภาค",
+            "mid": "กลางภาค",
+            "after_mid": "หลังกลางภาค",
+            "final": "ปลายภาค"
+        }
 
         for key in score_keys:
             # Check SGS
@@ -157,7 +216,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
             if check_decimal(sgs_val):
                 results["errors"].append({
                     "student_id": sid, "name": name, "type": "Decimal Error",
-                    "message": f"SGS คะแนน {key} มีทศนิยม ({sgs_val})"
+                    "message": f"SGS คะแนน {period_names.get(key, key)} มีทศนิยม ({sgs_val})"
                 })
                 add_highlight("sgs", sgs_page, sgs["bboxes"].get(key), "red")
                 
@@ -166,17 +225,25 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
             if check_decimal(ns_val):
                 results["errors"].append({
                     "student_id": sid, "name": name, "type": "Decimal Error",
-                    "message": f"NextSchool ผลรวมคะแนน {key} มีทศนิยม ({ns_val})"
+                    "message": f"NextSchool ผลรวมคะแนน {period_names.get(key, key)} มีทศนิยม ({ns_val})"
                 })
                 add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sum"), "red")
                 
             # Check NextSchool Subs
             subs = ns.get("subs", {}).get(key, {})
-            for sub_idx, sub_val in subs.items():
+            sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
+            for i, (sub_idx, sub_val) in enumerate(sorted_subs_items):
+                unit_num = i + 1
                 if check_decimal(str(sub_val)):
+                    try:
+                        header_name = find_header_name(ns_grid, int(sub_idx))
+                        display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
+                    except (ValueError, IndexError):
+                        display_name = f"หน่วยที่ {unit_num}"
+                        
                     results["errors"].append({
                         "student_id": sid, "name": name, "type": "Decimal Error",
-                        "message": f"NextSchool คะแนนย่อยช่องที่ {sub_idx} ({key}) มีทศนิยม ({sub_val})"
+                        "message": f"NextSchool {display_name} ({period_names.get(key, key)}) มีทศนิยม ({sub_val})"
                     })
                     add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sub_{sub_idx}"), "red")
                     
@@ -198,74 +265,91 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                 })
                 add_highlight("nextschool", ns_page, ns["bboxes"].get("total"), "red")
 
-        # 2. Consistency Check (Error) on SGS (Only for final)
+        # 2. Consistency & Strict Checks on SGS (Only for final)
         if round_type == "final":
-            grade = str(sgs.get("grade", ""))
+            grade = str(sgs.get("grade", "")).strip()
+            if grade.endswith(".0"):
+                grade = grade[:-2]
             
-            is_low_grade = grade in ["0", "1", "1.5", "ร", "มส"]
-            is_high_grade = grade in ["3", "3.5", "4"]
+            # check ONLY items 3, 4, 6 (indices 2, 3, 5) for Consistency
+            check_indices = {2, 3, 5}
             
-            if is_low_grade or is_high_grade:
-                # skip items 1, 2, 5, 8, 9 (indices 0, 1, 4, 7, 8)
-                skip_indices = {0, 1, 4, 7, 8}
-                
-                # Check Characteristics (char_scores)
-                for i, c in enumerate(sgs.get("char_scores", [])):
-                    if i in skip_indices:
-                        continue
-                        
-                    if is_low_grade and c in ["2", "3"]:
-                        results["warnings"].append({
-                            "student_id": sid, "name": name, "type": "Consistency Warning",
-                            "message": f"เกรดต่ำ ({grade}) แต่คุณลักษณะข้อที่ {i+1} สูง ({c})"
-                        })
-                        add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
-                        
-                    elif is_high_grade and c in ["0", "1", ""]:
-                        # also warn if blank ("") when it's supposed to be high
-                        results["warnings"].append({
-                            "student_id": sid, "name": name, "type": "Consistency Warning",
-                            "message": f"เกรดสูง ({grade}) แต่คุณลักษณะข้อที่ {i+1} ต่ำ ({c or 'ว่าง'})"
-                        })
-                        add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
-            
-                # Check Reading/Analytical Thinking (comp_scores)
-                for i, c in enumerate(sgs.get("comp_scores", [])):
-                    if is_low_grade and c in ["2", "3"]:
+            # Check Characteristics (char_scores)
+            for i, c in enumerate(sgs.get("char_scores", [])):
+                # Rule 1: ห้ามคะแนนเป็น 0 (เช็คทุกข้อ 1-8)
+                if c in ["0", ""]:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Characteristic Error",
+                        "message": f"คุณลักษณะข้อที่ {i+1} เป็น 0 หรือปล่อยว่าง (ต้องให้คะแนนอย่างน้อย 1)"
+                    })
+                    add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
+
+                # Rules for checked items (3, 4, 6)
+                if i in check_indices:
+                    # Rule 2: ผลการเรียน มส และ 0 ให้ 1 เท่านั้น
+                    if grade in ["0", "มส"]:
+                        if c not in ["0", ""] and c != "1":
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Characteristic Error",
+                                "message": f"เกรด {grade} บังคับให้คุณลักษณะข้อที่ {i+1} ต้องเป็น 1 เท่านั้น (ตอนนี้เป็น {c})"
+                            })
+                            add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
+                    else:
+                        # Rule 3: ความสอดคล้อง
+                        if grade in ["1", "1.5"]:
+                            if c == "3":
+                                results["warnings"].append({
+                                    "student_id": sid, "name": name, "type": "Consistency Warning",
+                                    "message": f"เกรดต่ำ ({grade}) แต่คุณลักษณะข้อที่ {i+1} สูง ({c})"
+                                })
+                                add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
+                        elif grade == "ร":
+                            if c in ["2", "3"]:
+                                results["warnings"].append({
+                                    "student_id": sid, "name": name, "type": "Consistency Warning",
+                                    "message": f"ติด ร ({grade}) แต่คุณลักษณะข้อที่ {i+1} สูง ({c})"
+                                })
+                                add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
+                        elif grade in ["3", "3.5", "4"]:
+                            if c in ["1", "0", ""]:
+                                results["warnings"].append({
+                                    "student_id": sid, "name": name, "type": "Consistency Warning",
+                                    "message": f"เกรดสูง ({grade}) แต่คุณลักษณะข้อที่ {i+1} ต่ำ ({c or 'ว่าง'})"
+                                })
+                                add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
+
+            # Check Reading/Analytical Thinking (comp_scores)
+            for i, c in enumerate(sgs.get("comp_scores", [])):
+                if grade in ["1", "1.5"]:
+                    if c == "3":
                         results["warnings"].append({
                             "student_id": sid, "name": name, "type": "Consistency Warning",
                             "message": f"เกรดต่ำ ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} สูง ({c})"
                         })
                         add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
-                        
-                    elif is_high_grade and c in ["0", "1", ""]:
+                elif grade in ["0", "ร", "มส"]:
+                    if c in ["2", "3"]:
+                        results["warnings"].append({
+                            "student_id": sid, "name": name, "type": "Consistency Warning",
+                            "message": f"เกรดตก/ติด ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} สูง ({c})"
+                        })
+                        add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
+                elif grade in ["3", "3.5", "4"]:
+                    if c in ["0", "1", ""]:
                         results["warnings"].append({
                             "student_id": sid, "name": name, "type": "Consistency Warning",
                             "message": f"เกรดสูง ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} ต่ำ ({c or 'ว่าง'})"
                         })
                         add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
-                    
+
         # 3. Mismatch Check: SGS vs NextSchool Sums (Error)
-        period_names = {
-            "before_mid": "ก่อนกลางภาค",
-            "mid": "กลางภาค",
-            "after_mid": "หลังกลางภาค",
-            "final": "ปลายภาค"
-        }
         for key in score_keys:
             sgs_val_str = sgs.get("scores", {}).get(key, "")
             ns_val_str = ns.get("sums", {}).get(key, "")
             
-            # Allow blank equivalent to 0, extract only integer part
-            import re
-            
-            def extract_int(v_str):
-                v_str = str(v_str).split('.')[0] # Ignore decimals
-                digits = re.sub(r'\D', '', v_str) # Keep only digits
-                return int(digits) if digits else 0
-                
-            sgs_val = extract_int(sgs_val_str)
-            ns_val = extract_int(ns_val_str)
+            # Allow blank equivalent to 0
+            sgs_val = float(sgs_val_str) if sgs_val_str.replace('.', '', 1).isdigit() else 0.0
+            ns_val = float(ns_val_str) if ns_val_str.replace('.', '', 1).isdigit() else 0.0
             
             if abs(sgs_val - ns_val) > 0.01:
                 p_name = period_names.get(key, key)
@@ -276,9 +360,9 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                 add_highlight("sgs", sgs_page, sgs["bboxes"].get(key), "red")
                 add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sum"), "red")
                 
-        # 4. Half Score Check (Warning)
-        warning_keys = ["before_mid", "mid"] if round_type == "midterm" else ["before_mid", "mid", "after_mid"]
-        for key in warning_keys: # Skip final
+        # 4. Half Score Check (Warning) - Only for Midterm Round now (Final round uses Rule 6.1 Error)
+        warning_keys = ["before_mid", "mid"] if round_type == "midterm" else []
+        for key in warning_keys:
             # Check SGS
             full = sgs_max_scores.get(key)
             if full:
@@ -288,7 +372,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                     if val < (full / 2):
                         results["warnings"].append({
                             "student_id": sid, "name": name, "type": "Low Score Warning",
-                            "message": f"SGS คะแนน {key} ({val}) ต่ำกว่าครึ่งหนึ่งของ {full}"
+                            "message": f"SGS คะแนน {period_names.get(key, key)} ({val}) ต่ำกว่าครึ่งหนึ่งของ {full}"
                         })
                         add_highlight("sgs", sgs_page, sgs["bboxes"].get(key), "yellow")
                 except ValueError:
@@ -301,11 +385,9 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                 try:
                     val_ns = float(val_str_ns)
                     if val_ns < (full_ns_sum / 2):
-                        period_names = {"before_mid": "ก่อนกลางภาค", "mid": "กลางภาค", "after_mid": "หลังกลางภาค", "final": "ปลายภาค"}
-                        thai_key = period_names.get(key, key)
                         results["warnings"].append({
                             "student_id": sid, "name": name, "type": "Low Score Warning",
-                            "message": f"NextSchool ผลรวม {thai_key} ({val_ns}) ต่ำกว่าครึ่งหนึ่งของ {full_ns_sum}"
+                            "message": f"NextSchool ผลรวม {period_names.get(key, key)} ({val_ns}) ต่ำกว่าครึ่งหนึ่งของ {full_ns_sum}"
                         })
                         add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sum"), "yellow")
                 except ValueError:
@@ -313,31 +395,30 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                     
             # Check NextSchool Subs
             subs = ns.get("subs", {}).get(key, {})
-            # Build sorted sub key list for this period to get sequential unit number
-            period_sub_keys_sorted = sorted(
-                [k for k in ns_max_scores.keys() if k.startswith(f"{key}_sub_")],
-                key=lambda k: int(k.split("_sub_")[-1])
-            )
-            sub_idx_to_unit = {k.split("_sub_")[-1]: (i + 1) for i, k in enumerate(period_sub_keys_sorted)}
-            
-            for sub_idx, sub_val_str in subs.items():
+            sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
+            for i, (sub_idx, sub_val_str) in enumerate(sorted_subs_items):
+                unit_num = i + 1
                 full_sub = ns_max_scores.get(f"{key}_sub_{sub_idx}")
                 if full_sub:
                     try:
                         val_sub = float(sub_val_str)
                         if val_sub < (full_sub / 2):
-                            period_names = {"before_mid": "ก่อนกลางภาค", "mid": "กลางภาค", "after_mid": "หลังกลางภาค", "final": "ปลายภาค"}
                             thai_key = period_names.get(key, key)
-                            unit_num = sub_idx_to_unit.get(str(sub_idx), sub_idx)
+                            try:
+                                header_name = find_header_name(ns_grid, int(sub_idx))
+                                display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
+                            except (ValueError, IndexError):
+                                display_name = f"หน่วยที่ {unit_num}"
+                                
                             results["warnings"].append({
                                 "student_id": sid, "name": name, "type": "Low Score Warning",
-                                "message": f"NextSchool คะแนนย่อย {thai_key} หน่วยที่ {unit_num} ({val_sub}) ต่ำกว่าครึ่งหนึ่งของ {full_sub}"
+                                "message": f"NextSchool {display_name} ({thai_key}) ต่ำกว่าครึ่งหนึ่ง ({val_sub}/{full_sub})"
                             })
                             add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{key}_sub_{sub_idx}"), "yellow")
                     except ValueError:
                         pass
                         
-        # 5. At-Risk Check
+        # 5. At-Risk Check (Only for midterm round)
         if round_type == "midterm":
             max_before = ns_max_scores.get("before_mid_sum", 0)
             max_mid = ns_max_scores.get("mid_sum", 0)
@@ -364,43 +445,225 @@ def validate_scores(sgs_data, nextschool_data, round_type="final"):
                         "max_score": total_max,
                         "reason": "คะแนนต่ำกว่าครึ่ง"
                     })
-        else: # Final round
-            # Check grade first
-            grade = str(ns.get("grade", "")).strip()
-            # Clean .0 for grades
-            if grade.endswith(".0"):
-                grade = grade[:-2]
+
+        # 6. Additional Grade Rules (Error)
+        if round_type == "final":
+            sgs_grade_raw = str(sgs.get("grade", "")).strip()
+            if sgs_grade_raw.endswith(".0"):
+                sgs_grade_raw = sgs_grade_raw[:-2]
                 
-            is_at_risk = False
-            reason = ""
-            
-            if grade in ["0", "ร", "มส", "มผ"]:
-                is_at_risk = True
-                reason = f"ผลการเรียน {grade}"
-            else:
-                # Check if any main column is less than half
-                sections = ["before_mid", "mid", "after_mid", "final"]
-                for sec in sections:
+            ns_grade_raw = str(ns.get("grade", "")).strip()
+            if ns_grade_raw.endswith(".0"):
+                ns_grade_raw = ns_grade_raw[:-2]
+
+            # 6.0 Grade Mismatch Check
+            # ตรวจเฉพาะเมื่อมีเกรดใน SGS เท่านั้น เพราะ NextSchool อาจว่าง
+            # ถ้า NextSchool มีเกรดด้วย แล้วไม่ตรงกัน ถือว่า Error
+            if sgs_grade_raw:
+                if ns_grade_raw and sgs_grade_raw != ns_grade_raw:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Grade Mismatch",
+                        "message": f"ผลการเรียนไม่ตรงกัน (SGS = {sgs_grade_raw}, NextSchool = {ns_grade_raw})"
+                    })
+                    add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+                    add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+
+            # Rule 6.1: เกรด 0-4 ทุกช่องต้องผ่านครึ่ง
+            # ใช้เกรดจาก SGS เป็นหลักในการตัดสิน
+            if sgs_grade_raw in ["0", "1", "1.5", "2", "2.5", "3", "3.5", "4"]:
+                sections = [("before_mid", "ก่อนกลางภาค"), ("mid", "กลางภาค"), ("after_mid", "หลังกลางภาค")]
+                for sec, sec_name in sections:
                     sec_max = ns_max_scores.get(f"{sec}_sum", 0)
                     if sec_max > 0:
-                        val_str = ns.get("sums", {}).get(sec, "0")
+                        # --- SGS: ตรวจยอดรวม ---
+                        sgs_val_str = sgs.get("scores", {}).get(sec, "0")
                         try:
-                            val = float(val_str) if val_str else 0
-                            if val < (sec_max / 2):
-                                is_at_risk = True
-                                sec_names = {"before_mid": "ก่อนกลางภาค", "mid": "กลางภาค", "after_mid": "หลังกลางภาค", "final": "ปลายภาค"}
-                                reason = f"คะแนน{sec_names[sec]}ไม่ผ่านครึ่ง"
-                                break
+                            sgs_val = float(sgs_val_str) if sgs_val_str else 0
                         except ValueError:
-                            pass
-                            
-            if is_at_risk:
-                results["at_risk_students"].append({
-                    "id": sid,
-                    "name": name,
-                    "score": grade if grade in ["0", "ร", "มส"] else "-",
-                    "max_score": "-",
-                    "reason": reason
-                })
+                            sgs_val = 0
+                        if sgs_val < (sec_max / 2):
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                "message": f"SGS: เกรด {sgs_grade_raw} แต่คะแนน{sec_name} ({sgs_val}) ไม่ผ่านครึ่งของ {sec_max}"
+                            })
+                            add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "red")
+
+                        # --- NextSchool: ตรวจยอดรวม ---
+                        ns_val_str = ns.get("sums", {}).get(sec, "0")
+                        try:
+                            ns_val = float(ns_val_str) if ns_val_str else 0
+                        except ValueError:
+                            ns_val = 0
+                        if ns_val < (sec_max / 2):
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ยอดรวม{sec_name} ({ns_val}) ไม่ผ่านครึ่งของ {sec_max}"
+                            })
+                            add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sum"), "red")
+
+                        # --- NextSchool: ตรวจแต่ละช่องย่อย ---
+                        subs = ns.get("subs", {}).get(sec, {})
+                        sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
+                        for i_sub, (sub_idx, sub_val_str) in enumerate(sorted_subs_items):
+                            unit_num = i_sub + 1
+                            full_sub = ns_max_scores.get(f"{sec}_sub_{sub_idx}")
+                            if full_sub:
+                                try:
+                                    val_sub = float(sub_val_str) if sub_val_str else 0
+                                    if val_sub < (full_sub / 2):
+                                        try:
+                                            header_name = find_header_name(ns_grid, int(sub_idx))
+                                            display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
+                                        except (ValueError, IndexError):
+                                            display_name = f"หน่วยที่ {unit_num}"
+                                        results["errors"].append({
+                                            "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                            "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ช่องย่อย {display_name} ({sec_name}) ได้ ({val_sub}) ไม่ผ่านครึ่งของ {full_sub}"
+                                        })
+                                        add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sub_{sub_idx}"), "red")
+                                except ValueError:
+                                    pass
+
+            # Rule 6.2: ติด ร ต้องมีคะแนนรวมว่างเปล่า (total == 0 หรือว่าง)
+            if sgs_grade_raw == "ร":
+                sgs_total_str = sgs.get("total", "")
+                try:
+                    sgs_total = float(sgs_total_str) if sgs_total_str else 0
+                except ValueError:
+                    sgs_total = 0
+                if sgs_total > 0:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                        "message": f"SGS: ติด 'ร' แต่มีคะแนนรวม ({sgs_total}) ควรจะว่าง"
+                    })
+                    add_highlight("sgs", sgs_page, sgs["bboxes"].get("total"), "red")
+                    
+                ns_total_str = ns.get("total", "")
+                try:
+                    ns_total = float(ns_total_str) if ns_total_str else 0
+                except ValueError:
+                    ns_total = 0
+                if ns_total > 0:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                        "message": f"NextSchool: ติด 'ร' แต่มีคะแนนรวม ({ns_total}) ควรจะว่าง"
+                    })
+                    add_highlight("nextschool", ns_page, ns["bboxes"].get("total"), "red")
+
+            # Rule 6.3: ติด มส ห้ามมีคะแนนหลังกลางภาค (ยอดรวม + แต่ละช่องย่อย) และคะแนนปลายภาค
+            # ตรวจแยกกัน: SGS ตามเกรด SGS / NextSchool ตามเกรด NextSchool
+            
+            # -------------------------------------------------------------
+            # Rule 6.3: ตรวจสอบ มส. ตามประกาศทางการ (เวลาเรียนไม่ถึง 80%)
+            # -------------------------------------------------------------
+            sp_key = f"{subj_code}{sid}"
+            is_official_ms = sp_key in official_ms_records
+            is_allowed_to_test = sp_key in allowed_exemptions
+
+            # กฎ มส. ข้อที่ 1: ตรวจว่ามีใครให้ มส. เองทีหลังหรือไม่ (Unauthorized มส.)
+            if sgs_grade_raw == "มส" or ns_grade_raw == "มส":
+                if is_allowed_to_test:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Unauthorized MS Error",
+                        "message": f"นักเรียนได้รับอนุญาตให้เข้าสอบวิชานี้แล้วตามประกาศทางการ (แก้เวลาเรียนแล้ว) ห้ามให้ผลการเรียน 'มส' ต้องประเมินและให้เกรดตามปกติ"
+                    })
+                    if sgs_grade_raw == "มส":
+                        add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+                    if ns_grade_raw == "มส":
+                        add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+                elif official_ms_records and not is_official_ms:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Unauthorized MS Error",
+                        "message": f"นักเรียนได้ผลการเรียน 'มส' ในวิชานี้ ({subj_code}) แต่ไม่อยู่ในประกาศรายชื่อ มส. ทางการของโรงเรียน (เวลาเรียนไม่ถึง 80%) — อาจเป็นการให้ มส. เองทีหลังโดยไม่ได้รับอนุมัติ"
+                    })
+                    if sgs_grade_raw == "มส":
+                        add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+                    if ns_grade_raw == "มส":
+                        add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+                elif ms_list and sid not in ms_list:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                        "message": "ติด 'มส' แต่นักเรียนไม่มีชื่อในประกาศรายชื่อผู้มีสิทธิ์สอบ"
+                    })
+                    if sgs_grade_raw == "มส":
+                        add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+                    if ns_grade_raw == "มส":
+                        add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+
+            # กฎ มส. ข้อที่ 2: ตรวจว่าไปแอบให้เกรดนักเรียนที่ มส. โดยไม่ได้ตั้งใจหรือไม่ (Accidental grading)
+            if is_official_ms and round_type == "final":
+                ms_info = official_ms_records[sp_key]
+                ms_reason = ms_info.get("pending_task") or ms_info.get("remark") or "เวลาเรียนไม่ถึง 80%"
+                
+                # ถ้าครูใส่เกรดอื่นที่ไม่ใช่ มส. (เช่น 0, 1, 2, 3, 4, ร)
+                if sgs_grade_raw and sgs_grade_raw != "มส":
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Official MS Violation",
+                        "message": f"SGS: นักเรียนมีรายชื่อติด 'มส.' ทางการในวิชานี้ ({ms_reason}) ไม่อนุญาตให้เข้าสอบ แต่ครูให้เกรด '{sgs_grade_raw}' — ห้ามให้เกรดเด็ดขาด ต้องให้ผลการเรียน 'มส' เท่านั้น"
+                    })
+                    add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+
+                if ns_grade_raw and ns_grade_raw != "มส":
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Official MS Violation",
+                        "message": f"NextSchool: นักเรียนมีรายชื่อติด 'มส.' ทางการในวิชานี้ ({ms_reason}) ไม่อนุญาตให้เข้าสอบ แต่มีเกรด '{ns_grade_raw}' — ห้ามให้เกรดเด็ดขาด ต้องให้ผลการเรียน 'มส' เท่านั้น"
+                    })
+                    add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+
+            for sec, sec_name in [("after_mid", "หลังกลางภาค"), ("final", "ปลายภาค")]:
+
+                # --- SGS: ตรวจเฉพาะเมื่อ SGS grade เป็น มส ---
+                if sgs_grade_raw == "มส":
+                    sgs_val_str = sgs.get("scores", {}).get(sec, "")
+                    try:
+                        sgs_val = float(sgs_val_str) if sgs_val_str else 0
+                    except ValueError:
+                        sgs_val = 0
+                    if sgs_val > 0:
+                        results["errors"].append({
+                            "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                            "message": f"SGS: ติด 'มส' แต่มีการกรอกคะแนน{sec_name} ({sgs_val}) ต้องเว้นว่าง"
+                        })
+                        add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "red")
+
+                # --- NextSchool: ตรวจเฉพาะเมื่อ NS grade เป็น มส ---
+                if ns_grade_raw == "มส":
+                    # ยอดรวม
+                    if sec == "final":
+                        ns_val_str = ns.get("final", "") or ns.get("sums", {}).get("final", "")
+                    else:
+                        ns_val_str = ns.get("sums", {}).get(sec, "")
+                    try:
+                        ns_val = float(ns_val_str) if ns_val_str else 0
+                    except ValueError:
+                        ns_val = 0
+                    if ns_val > 0:
+                        results["errors"].append({
+                            "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                            "message": f"NextSchool: ติด 'มส' แต่มียอดรวมคะแนน{sec_name} ({ns_val}) ต้องเว้นว่าง"
+                        })
+                        bbox_key = f"{sec}_sum" if sec == "after_mid" else "final"
+                        add_highlight("nextschool", ns_page, ns["bboxes"].get(bbox_key), "red")
+
+                    # ช่องย่อย (หลังกลางภาค และ ปลายภาค)
+                    subs = ns.get("subs", {}).get(sec, {})
+                    sorted_subs_items = sorted(subs.items(), key=lambda x: int(x[0]))
+                    for i_sub, (sub_idx, sub_val_str) in enumerate(sorted_subs_items):
+                        unit_num = i_sub + 1
+                        try:
+                            val_sub = float(sub_val_str) if sub_val_str else 0
+                        except ValueError:
+                            val_sub = 0
+                        if val_sub > 0:
+                            try:
+                                header_name = find_header_name(ns_grid, int(sub_idx))
+                                display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
+                            except (ValueError, IndexError):
+                                display_name = f"หน่วยที่ {unit_num}"
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                "message": f"NextSchool: ติด 'มส' แต่ช่องย่อย {display_name} ({sec_name}) มีคะแนน ({val_sub}) ต้องเว้นว่าง"
+                            })
+                            add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sub_{sub_idx}"), "red")
 
     return results

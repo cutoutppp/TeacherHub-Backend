@@ -8,6 +8,8 @@ import ssl
 
 MASTERDATA_GAS_URL = "https://script.google.com/macros/s/AKfycbwgO1B9LfXkGJNpDei8--Tqt8HkwVOL9yb6jnAG5MOzQVQzZGxAOJTM-wRWxo_vgTgfgw/exec"
 
+ADMIN_TEACCODES = {'444', '440', '242', '842', '234'}
+
 class Teacher(BaseModel):
     id: int = 0
     userid: str
@@ -55,7 +57,7 @@ class MasterDatabase:
                     raw_teachers = data.get('data', [])
                     self._cache = []
                     for idx, row in enumerate(raw_teachers):
-                        is_admin_flag = str(row.get('IsAdmin', '')).lower() == 'true' or str(row.get('TeacCode', '')) == '444'
+                        is_admin_flag = str(row.get('IsAdmin', '')).lower() == 'true' or str(row.get('TeacCode', '')).strip() in ADMIN_TEACCODES
                         t = Teacher(
                             id=idx + 1,
                             userid=str(row.get('UserID', '')).strip(),

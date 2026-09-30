@@ -1,5 +1,31 @@
 import re
+import os
+import json
 from .score_db import get_expected_scores
+
+_OFFICIAL_MS_CACHE = None
+
+def _load_official_ms():
+    global _OFFICIAL_MS_CACHE
+    if _OFFICIAL_MS_CACHE is not None:
+        return _OFFICIAL_MS_CACHE
+    
+    cur_dir = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(cur_dir, "official_ms_list.json"),
+        os.path.join(os.path.dirname(cur_dir), "official_ms_list.json"),
+        os.path.join(cur_dir, "..", "..", "AssessmentHub", "SgsNextschool", "backend", "official_ms_list.json")
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    _OFFICIAL_MS_CACHE = json.load(f)
+                    return _OFFICIAL_MS_CACHE
+            except Exception:
+                pass
+    _OFFICIAL_MS_CACHE = {"ms_records": {}, "allowed_exemptions": {}}
+    return _OFFICIAL_MS_CACHE
 
 def find_header_name(grid, col_idx):
     for row_key in ["row0", "row1", "row2", "row3", "cols"]:
@@ -16,6 +42,11 @@ def find_header_name(grid, col_idx):
 def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None):
     if ms_list is None:
         ms_list = set()
+    
+    official_ms_db = _load_official_ms()
+    official_ms_records = official_ms_db.get("ms_records", {})
+    allowed_exemptions = official_ms_db.get("allowed_exemptions", {})
+    subj_code = (sgs_data.get("subject_code") or nextschool_data.get("subject_code") or "").strip()
     results = {
         "precheck_passed": False,
         "precheck_message": "",
@@ -522,14 +553,61 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
             # Rule 6.3: ติด มส ห้ามมีคะแนนหลังกลางภาค (ยอดรวม + แต่ละช่องย่อย) และคะแนนปลายภาค
             # ตรวจแยกกัน: SGS ตามเกรด SGS / NextSchool ตามเกรด NextSchool
             
-            # ตรวจรายชื่อ (ใช้ sgs เป็นหลัก)
-            if sgs_grade_raw == "มส":
-                if ms_list and sid not in ms_list:
+            # -------------------------------------------------------------
+            # Rule 6.3: ตรวจสอบ มส. ตามประกาศทางการ (เวลาเรียนไม่ถึง 80%)
+            # -------------------------------------------------------------
+            sp_key = f"{subj_code}{sid}"
+            is_official_ms = sp_key in official_ms_records
+            is_allowed_to_test = sp_key in allowed_exemptions
+
+            # กฎ มส. ข้อที่ 1: ตรวจว่ามีใครให้ มส. เองทีหลังหรือไม่ (Unauthorized มส.)
+            if sgs_grade_raw == "มส" or ns_grade_raw == "มส":
+                if is_allowed_to_test:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Unauthorized MS Error",
+                        "message": f"นักเรียนได้รับอนุญาตให้เข้าสอบวิชานี้แล้วตามประกาศทางการ (แก้เวลาเรียนแล้ว) ห้ามให้ผลการเรียน 'มส' ต้องประเมินและให้เกรดตามปกติ"
+                    })
+                    if sgs_grade_raw == "มส":
+                        add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+                    if ns_grade_raw == "มส":
+                        add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+                elif official_ms_records and not is_official_ms:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Unauthorized MS Error",
+                        "message": f"นักเรียนได้ผลการเรียน 'มส' ในวิชานี้ ({subj_code}) แต่ไม่อยู่ในประกาศรายชื่อ มส. ทางการของโรงเรียน (เวลาเรียนไม่ถึง 80%) — อาจเป็นการให้ มส. เองทีหลังโดยไม่ได้รับอนุมัติ"
+                    })
+                    if sgs_grade_raw == "มส":
+                        add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+                    if ns_grade_raw == "มส":
+                        add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+                elif ms_list and sid not in ms_list:
                     results["errors"].append({
                         "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                        "message": "ติด 'มส' แต่นักเรียนไม่มีชื่อในประกาศรายชื่อผู้มีสิทธิ์สอบ (Teacode 444)"
+                        "message": "ติด 'มส' แต่นักเรียนไม่มีชื่อในประกาศรายชื่อผู้มีสิทธิ์สอบ"
+                    })
+                    if sgs_grade_raw == "มส":
+                        add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+                    if ns_grade_raw == "มส":
+                        add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
+
+            # กฎ มส. ข้อที่ 2: ตรวจว่าไปแอบให้เกรดนักเรียนที่ มส. โดยไม่ได้ตั้งใจหรือไม่ (Accidental grading)
+            if is_official_ms and round_type == "final":
+                ms_info = official_ms_records[sp_key]
+                ms_reason = ms_info.get("pending_task") or ms_info.get("remark") or "เวลาเรียนไม่ถึง 80%"
+                
+                # ถ้าครูใส่เกรดอื่นที่ไม่ใช่ มส. (เช่น 0, 1, 2, 3, 4, ร)
+                if sgs_grade_raw and sgs_grade_raw != "มส":
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Official MS Violation",
+                        "message": f"SGS: นักเรียนมีรายชื่อติด 'มส.' ทางการในวิชานี้ ({ms_reason}) ไม่อนุญาตให้เข้าสอบ แต่ครูให้เกรด '{sgs_grade_raw}' — ห้ามให้เกรดเด็ดขาด ต้องให้ผลการเรียน 'มส' เท่านั้น"
                     })
                     add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
+
+                if ns_grade_raw and ns_grade_raw != "มส":
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Official MS Violation",
+                        "message": f"NextSchool: นักเรียนมีรายชื่อติด 'มส.' ทางการในวิชานี้ ({ms_reason}) ไม่อนุญาตให้เข้าสอบ แต่มีเกรด '{ns_grade_raw}' — ห้ามให้เกรดเด็ดขาด ต้องให้ผลการเรียน 'มส' เท่านั้น"
+                    })
                     add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
 
             for sec, sec_name in [("after_mid", "หลังกลางภาค"), ("final", "ปลายภาค")]:

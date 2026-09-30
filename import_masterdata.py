@@ -49,7 +49,7 @@ def import_data():
         pin_hash = get_pin_hash(pin)
         
         # Admin assignment
-        is_admin = (teaccode == "444")
+        is_admin = teaccode in ["444", "440", "242", "842", "234"]
         
         teacher = Teacher(
             userid=userid,
