@@ -524,31 +524,8 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                                 except ValueError:
                                     pass
 
-            # Rule 6.2: ติด ร ต้องมีคะแนนรวมว่างเปล่า (total == 0 หรือว่าง)
-            if sgs_grade_raw == "ร":
-                sgs_total_str = sgs.get("total", "")
-                try:
-                    sgs_total = float(sgs_total_str) if sgs_total_str else 0
-                except ValueError:
-                    sgs_total = 0
-                if sgs_total > 0:
-                    results["errors"].append({
-                        "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                        "message": f"SGS: ติด 'ร' แต่มีคะแนนรวม ({sgs_total}) ควรจะว่าง"
-                    })
-                    add_highlight("sgs", sgs_page, sgs["bboxes"].get("total"), "red")
-                    
-                ns_total_str = ns.get("total", "")
-                try:
-                    ns_total = float(ns_total_str) if ns_total_str else 0
-                except ValueError:
-                    ns_total = 0
-                if ns_total > 0:
-                    results["errors"].append({
-                        "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                        "message": f"NextSchool: ติด 'ร' แต่มีคะแนนรวม ({ns_total}) ควรจะว่าง"
-                    })
-                    add_highlight("nextschool", ns_page, ns["bboxes"].get("total"), "red")
+            # Rule 6.2: ติด ร สามารถมีคะแนนเก็บสะสมเดิมได้ตามจริง (เช่น 30.0 หรือคะแนนเก็บก่อนสอบปลายภาค)
+            # ไม่บังคับให้คะแนนรวมต้องว่างเปล่า (ตามระเบียบวัดผลและใบ วผ.16)
 
             # Rule 6.3: ติด มส ห้ามมีคะแนนหลังกลางภาค (ยอดรวม + แต่ละช่องย่อย) และคะแนนปลายภาค
             # ตรวจแยกกัน: SGS ตามเกรด SGS / NextSchool ตามเกรด NextSchool
