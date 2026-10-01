@@ -275,23 +275,36 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                         except ValueError:
                             pass
 
-            no_col, id_col, name_col, credit_col, gpa_col = 1, 3, 5, 7, 8
+            # Dynamically detect key columns: no_col, id_col, name_col, credit_col, gpa_col
+            no_col, id_col, name_col, credit_col, gpa_col = None, None, None, None, None
+            for r in range(min(20, len(df))):
+                for c in range(min(20, df.shape[1])):
+                    v = str(df.iloc[r, c]).strip()
+                    if 'เลขที่' in v and no_col is None: no_col = c
+                    if 'เลขประจำตัว' in v and id_col is None: id_col = c
+                    if ('ชื่อ' in v or 'สกุล' in v) and name_col is None: name_col = c
+                    if v.upper() == 'GPA' and gpa_col is None: gpa_col = c
+                    if ('หน่วยกิต' in v or v == 'น.') and credit_col is None: credit_col = c
+
+            if gpa_col is not None and credit_col is None: credit_col = gpa_col - 1
+            if no_col is None: no_col = 0
+            if id_col is None: id_col = 2
+            if name_col is None: name_col = 5
+            if gpa_col is None: gpa_col = 7
+            if credit_col is None: credit_col = gpa_col - 1
             
             student_rows = []
             for i in range(subject_row_idx + 1, len(df)):
                 val = str(df.iloc[i, no_col]).replace('.0', '').strip()
-                if val.isdigit():
-                    student_rows.append(i)
+                if val.isdigit() and int(val) < 100:
+                    name_val = str(df.iloc[i, name_col]).strip()
+                    id_val = str(df.iloc[i, id_col]).replace('.0', '').strip()
+                    if id_val.isdigit() and name_val not in ['', 'nan', 'None'] and not any(k in name_val for k in ['เลขที่', 'เลขประจำตัว', 'ชื่อ', 'สกุล', 'ลงชื่อ', 'โรงเรียน', 'ผลการเรียน']):
+                        student_rows.append(i)
 
-            # Find active columns that actually have student data (eliminating empty spacer columns)
-            active_cols = []
-            for col_idx in range(len(df.columns)):
-                has_student_data = any(
-                    str(df.iloc[r, col_idx]).strip() not in ['', 'nan', 'None']
-                    for r in student_rows
-                )
-                if has_student_data:
-                    active_cols.append(col_idx)
+            # Active columns: [no, id, name, credit, gpa] + all subject columns with data
+            subject_cols = [c for c in range(gpa_col + 1, df.shape[1]) if any(str(df.iloc[r, c]).strip() not in ['', 'nan', 'None'] for r in student_rows)]
+            active_cols = [no_col, id_col, name_col, credit_col, gpa_col] + subject_cols
 
             anomaly_rows_map = {}
 
