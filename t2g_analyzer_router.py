@@ -199,8 +199,6 @@ def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, 
                 val_display = f'{val} <span class="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-purple-200 ml-1">เด็กเรียนร่วม (LD)</span>'
             elif val in ['0', '0.0', 'ร', 'มส', 'มผ']:
                 val_display = f'<span class="bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded text-[11px] border border-red-200">{val}</span>'
-            elif is_ld and c_pos >= 5 and val in ['1', '1.0']:
-                val_display = f'<span class="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[11px] border border-amber-300">{val}</span>'
             elif val in ['4', '4.0']:
                 val_display = f'<span class="font-bold text-indigo-700">{val}</span>'
             elif val == 'ผ':
@@ -399,7 +397,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                 anomalies = []
                 contacts = []
                 
-                # Rule 0: นักเรียนเรียนร่วม (พิเศษ/LD) - ผลการเรียนต้องมากกว่า 1 เท่านั้น
+                # Rule 0: นักเรียนเรียนร่วม (พิเศษ/LD) - ผลการเรียนต้องได้เกรดตั้งแต่ 1.0 ขึ้นไป (ห้ามติด 0/ร/มส/มผ)
                 if ld_info:
                     for col_idx, (subj, cred) in subjects.items():
                         grade_val = str(df.iloc[row_idx, col_idx]).strip()
@@ -408,23 +406,23 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                         
                         is_ld_violation = False
                         if cred < 10:
-                            # วิชาการ: ต้องมากกว่า 1 เท่านั้น (ห้ามได้ 0, 1, ร, มส, มผ)
-                            if grade_val in ['0', '0.0', '1', '1.0', 'ร', 'มส', 'มผ']:
+                            # วิชาการ: ต้องได้ตั้งแต่ 1.0 ขึ้นไป (ห้ามได้ 0, ร, มส, มผ หรือ < 1)
+                            if grade_val in ['0', '0.0', 'ร', 'มส', 'มผ']:
                                 is_ld_violation = True
                             else:
                                 try:
                                     num_g = float(grade_val)
-                                    if num_g <= 1.0:
+                                    if num_g < 1.0:
                                         is_ld_violation = True
                                 except ValueError:
                                     pass
                         else:
-                            # กิจกรรมพัฒนาผู้เรียน: ต้องผ่าน (ห้าม มผ หรือได้ <= 1)
-                            if grade_val in ['มผ', '0', '0.0', '1', '1.0']:
+                            # กิจกรรมพัฒนาผู้เรียน: ต้องผ่าน (ห้าม มผ)
+                            if grade_val == 'มผ':
                                 is_ld_violation = True
 
                         if is_ld_violation:
-                            anomalies.append(f"นักเรียนเรียนร่วม (พิเศษ/LD) ต้องมีผลการเรียนมากกว่า 1 เท่านั้น แต่ได้ผลการเรียน {grade_val} ในวิชา {subj}")
+                            anomalies.append(f"นักเรียนเรียนร่วม (พิเศษ/LD) ต้องมีผลการเรียนตั้งแต่ 1 ขึ้นไป (ห้ามติด 0/ร/มส) แต่ได้ผลการเรียน {grade_val} ในวิชา {subj}")
                             subj_code = subj.split()[0]
                             teacher = teacher_mapping.get(f"{subj_code}_{class_level}") or teacher_mapping.get(subj_code) or "ไม่พบข้อมูลครูผู้สอน"
                             contacts.append(f"{subj}: ติดต่อ {teacher}")
