@@ -468,6 +468,35 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                     add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
                     add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
 
+            # Custom Rule: นักเรียนกรณีพิเศษ ผลการเรียนต้องได้ 1 ขึ้นไป
+            special_students = [
+                "ภาณุพงษ์ รสโสดา",
+                "ณัฐพล โอนติ่ง",
+                "ณัฏฐนันท์ มณีศรี",
+                "นรภัทร ชาติตอง",
+                "อภิญญา ทัศนา",
+                "อำภา ด้วงทอง"
+            ]
+            if any(sp_name in name for sp_name in special_students):
+                for g_raw, g_type, g_page, g_source, bboxes in [
+                    (sgs_grade_raw, "SGS", sgs_page, "sgs", sgs.get("bboxes", {}) if sgs else {}),
+                    (ns_grade_raw, "NextSchool", ns_page, "nextschool", ns.get("bboxes", {}) if ns else {})
+                ]:
+                    if g_raw:
+                        grade_pass = False
+                        try:
+                            if float(g_raw) >= 1.0:
+                                grade_pass = True
+                        except ValueError:
+                            pass
+                        
+                        if not grade_pass:
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Special Student Grade Error",
+                                "message": f"นักเรียนกรณีพิเศษ ({name}) ผลการเรียนต้องได้ 1 ขึ้นไป ({g_type} ให้เกรด '{g_raw}')"
+                            })
+                            add_highlight(g_source, g_page, bboxes.get("grade"), "red")
+
             # Rule 6.1: เกรด 0-4 ทุกช่องต้องผ่านครึ่ง
             # ใช้เกรดจาก SGS เป็นหลักในการตัดสิน
             if sgs_grade_raw in ["0", "1", "1.5", "2", "2.5", "3", "3.5", "4"]:
