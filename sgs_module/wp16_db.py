@@ -217,10 +217,13 @@ def get_pending_tasks_for_subject(subject_code, teacher_name=None):
     """
     result = {}
     
-    # ดึงจาก Google Sheet (ส่งแค่ subject_code เพื่อไม่ให้ GAS filter ชื่อครูทิ้งถ้าพิมพ์ไม่ตรง)
-    gas_items = fetch_wp16_from_gas(subject_code)
+    gas_items = fetch_wp16_from_gas(subject_code, teacher_name)
     
     for it in gas_items:
+        t_name = str(it.get('teacher_name') or it.get('ครูผู้สอน') or '').strip()
+        if teacher_name and t_name and t_name != teacher_name:
+            continue
+            
         sid = str(it.get('student_id') or it.get('เลขประจำตัว') or '').strip()
         if not sid:
             continue
@@ -264,14 +267,20 @@ def remove_pending_task(subject_code, student_id, webhook_url=None):
         for k, v in db.items():
             if str(v.get('subject_code', '')).strip() == s_code and str(v.get('student_id', '')).strip() == s_id:
                 target_key = k
+                special_id = k
                 break
+                
+    # Always try to delete from GAS directly (as local DB might be wiped on ephemeral hosts)
+    try:
+        import requests, json
+        GAS_URL = webhook_url or "https://script.google.com/macros/s/AKfycbxzpP9b_eBJUU5KaNX1CbMOLHygMsrUdO7earro-bQIs8lMS9H6YM6Z6mlamm3jJd1fDQ/exec"
+        payload = json.dumps({'action': 'delete-wp16', 'special_id': special_id})
+        requests.post(GAS_URL, data=payload, headers={'Content-Type': 'text/plain;charset=utf-8'}, timeout=15)
+    except Exception as e:
+        print(f"[GAS DELETE] Error: {e}")
+
     if target_key:
         del db[target_key]
         _save_wp16_db(db)
-        try:
-            import threading
-            threading.Thread(target=sync_all_accumulated_tasks_to_gas, args=(webhook_url,), daemon=True).start()
-        except Exception:
-            pass
         return True
-    return False
+    return True # Assume success if sent to GAS
