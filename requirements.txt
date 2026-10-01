@@ -8,7 +8,10 @@ python-multipart
 pdfplumber
 pandas
 openpyxl
+xlrd>=2.0.1
+lxml
+html5lib
+beautifulsoup4
 python-docx
 PyMuPDF
-
 httpx
