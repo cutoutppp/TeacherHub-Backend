@@ -81,7 +81,37 @@ def get_teacher_mapping():
     _cached_teacher_mapping = mapping
     return mapping
 
-def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map):
+def normalize_thai_name(name: str) -> str:
+    if not name:
+        return ""
+    cleaned = re.sub(r'^(เด็กชาย|ด\.ช\.|เด็กหญิง|ด\.ญ\.|นาย|นางสาว|น\.ส\.)\s*', '', str(name).strip())
+    cleaned = re.sub(r'[\s\.\-_]+', '', cleaned)
+    return cleaned
+
+SPECIAL_LD_STUDENTS = [
+    {"name": "เด็กชายภาณุพงษ์ รสโสดา", "norm": "ภาณุพงษ์รสโสดา", "class_hint": "ม.3/7"},
+    {"name": "เด็กชายณัฐพล โอนติ่ง", "norm": "ณัฐพลโอนติ่ง", "class_hint": "ม.4/9"},
+    {"name": "เด็กชายณัฏฐนันท์ มณีศรี", "norm": "ณัฏฐนันท์มณีศรี", "class_hint": "ม.5/8"},
+    {"name": "นายนรภัทร ชาติตอง", "norm": "นรภัทรชาติตอง", "alt_norm": "กรภัทรชาติตอง", "class_hint": "ม.5/9"},
+    {"name": "เด็กหญิงอภิญญา ทัศนา", "norm": "อภิญญาทัศนา", "class_hint": "ม.5/10"},
+    {"name": "เด็กหญิงอำภา ด้วงทอง", "norm": "อำภาด้วงทอง", "class_hint": "ม.5/10"},
+]
+
+def find_ld_student_match(name: str):
+    cleaned = normalize_thai_name(name)
+    if not cleaned:
+        return None
+    for st in SPECIAL_LD_STUDENTS:
+        if st["norm"] in cleaned or cleaned in st["norm"]:
+            return st
+        if st.get("alt_norm") and (st["alt_norm"] in cleaned or cleaned in st["alt_norm"]):
+            return st
+    return None
+
+def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map, special_ld_rows=None):
+    if special_ld_rows is None:
+        special_ld_rows = set()
+
     # If no student rows or active cols detected, fallback to stripped df
     if not student_rows or not active_cols:
         # Drop all completely blank rows and columns
@@ -130,10 +160,14 @@ def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, 
 
     for s_idx, r_idx in enumerate(student_rows):
         is_anomaly = r_idx in anomaly_rows_map
+        is_ld = r_idx in special_ld_rows
         if is_anomaly:
             issues_text = " | ".join(anomaly_rows_map[r_idx])
             tr_class = "bg-red-50 hover:bg-red-100 transition-colors border-l-4 border-red-500 font-medium"
             tr_attrs = f'class="{tr_class}" title="{issues_text}"'
+        elif is_ld:
+            tr_class = "bg-purple-50/50 hover:bg-purple-100/50 transition-colors border-l-4 border-purple-400 font-medium"
+            tr_attrs = f'class="{tr_class}" title="นักเรียนเรียนร่วม (พิเศษ/LD)"'
         else:
             zebra = "bg-white" if s_idx % 2 == 0 else "bg-slate-50/60"
             tr_class = f"{zebra} hover:bg-indigo-50/50 transition-colors border-b border-slate-100 text-slate-700"
@@ -152,17 +186,21 @@ def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, 
             
             sticky_td = ""
             if c_pos == 0:
-                sticky_td = f"sticky left-0 { 'bg-red-50' if is_anomaly else 'bg-white' } z-10 font-mono"
+                sticky_td = f"sticky left-0 { 'bg-red-50' if is_anomaly else ('bg-purple-50' if is_ld else 'bg-white') } z-10 font-mono"
             elif c_pos == 1:
-                sticky_td = f"sticky left-[45px] { 'bg-red-50' if is_anomaly else 'bg-white' } z-10 font-mono"
+                sticky_td = f"sticky left-[45px] { 'bg-red-50' if is_anomaly else ('bg-purple-50' if is_ld else 'bg-white') } z-10 font-mono"
             elif c_pos == 2:
-                sticky_td = f"sticky left-[125px] { 'bg-red-50' if is_anomaly else 'bg-white' } z-10 border-r-2 border-slate-300 font-medium"
+                sticky_td = f"sticky left-[125px] { 'bg-red-50' if is_anomaly else ('bg-purple-50' if is_ld else 'bg-white') } z-10 border-r-2 border-slate-300 font-medium"
             elif c_pos == 4:
                 td_class += " font-bold text-slate-800"
 
             val_display = val
-            if val in ['0', '0.0', 'ร', 'มส', 'มผ']:
+            if c_pos == 2 and is_ld:
+                val_display = f'{val} <span class="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-purple-200 ml-1">เด็กเรียนร่วม (LD)</span>'
+            elif val in ['0', '0.0', 'ร', 'มส', 'มผ']:
                 val_display = f'<span class="bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded text-[11px] border border-red-200">{val}</span>'
+            elif is_ld and c_pos >= 5 and val in ['1', '1.0']:
+                val_display = f'<span class="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[11px] border border-amber-300">{val}</span>'
             elif val in ['4', '4.0']:
                 val_display = f'<span class="font-bold text-indigo-700">{val}</span>'
             elif val == 'ผ':
@@ -307,12 +345,17 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
             active_cols = [no_col, id_col, name_col, credit_col, gpa_col] + subject_cols
 
             anomaly_rows_map = {}
+            special_ld_rows = set()
 
             for row_idx in student_rows:
                 student_no = str(df.iloc[row_idx, no_col]).replace('.0', '')
                 student_id = str(df.iloc[row_idx, id_col]).replace('.0', '')
                 student_name = str(df.iloc[row_idx, name_col]).strip()
                 
+                ld_info = find_ld_student_match(student_name)
+                if ld_info:
+                    special_ld_rows.add(row_idx)
+
                 try:
                     given_gpa = float(df.iloc[row_idx, gpa_col])
                 except:
@@ -356,15 +399,46 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                 anomalies = []
                 contacts = []
                 
+                # Rule 0: นักเรียนเรียนร่วม (พิเศษ/LD) - ผลการเรียนต้องมากกว่า 1 เท่านั้น
+                if ld_info:
+                    for col_idx, (subj, cred) in subjects.items():
+                        grade_val = str(df.iloc[row_idx, col_idx]).strip()
+                        if grade_val in ['nan', 'None', '']:
+                            continue
+                        
+                        is_ld_violation = False
+                        if cred < 10:
+                            # วิชาการ: ต้องมากกว่า 1 เท่านั้น (ห้ามได้ 0, 1, ร, มส, มผ)
+                            if grade_val in ['0', '0.0', '1', '1.0', 'ร', 'มส', 'มผ']:
+                                is_ld_violation = True
+                            else:
+                                try:
+                                    num_g = float(grade_val)
+                                    if num_g <= 1.0:
+                                        is_ld_violation = True
+                                except ValueError:
+                                    pass
+                        else:
+                            # กิจกรรมพัฒนาผู้เรียน: ต้องผ่าน (ห้าม มผ หรือได้ <= 1)
+                            if grade_val in ['มผ', '0', '0.0', '1', '1.0']:
+                                is_ld_violation = True
+
+                        if is_ld_violation:
+                            anomalies.append(f"นักเรียนเรียนร่วม (พิเศษ/LD) ต้องมีผลการเรียนมากกว่า 1 เท่านั้น แต่ได้ผลการเรียน {grade_val} ในวิชา {subj}")
+                            subj_code = subj.split()[0]
+                            teacher = teacher_mapping.get(f"{subj_code}_{class_level}") or teacher_mapping.get(subj_code) or "ไม่พบข้อมูลครูผู้สอน"
+                            contacts.append(f"{subj}: ติดต่อ {teacher}")
+
                 # Rule 1: Good overall student who failed only 1-2 subjects
                 if (given_gpa >= 2.0 or grade_4_count >= 2) and (1 <= (ro_ms_zero_count + mopho_count) <= 2):
                     for f_subj in fail_subjects_names + mopho_subjects_names:
                         s_name = f_subj["subject"]
                         s_grade = f_subj["grade"]
-                        anomalies.append(f"ผลการเรียนดี (GPA {given_gpa} / เกรด 4 ได้ {grade_4_count} วิชา) แต่ติด {s_name} ({s_grade})")
-                        subj_code = s_name.split()[0]
-                        teacher = teacher_mapping.get(f"{subj_code}_{class_level}") or teacher_mapping.get(subj_code) or "ไม่พบข้อมูลครูผู้สอน"
-                        contacts.append(f"{s_name}: ติดต่อ {teacher}")
+                        if not any(s_name in a for a in anomalies):
+                            anomalies.append(f"ผลการเรียนดี (GPA {given_gpa} / เกรด 4 ได้ {grade_4_count} วิชา) แต่ติด {s_name} ({s_grade})")
+                            subj_code = s_name.split()[0]
+                            teacher = teacher_mapping.get(f"{subj_code}_{class_level}") or teacher_mapping.get(subj_code) or "ไม่พบข้อมูลครูผู้สอน"
+                            contacts.append(f"{s_name}: ติดต่อ {teacher}")
                     
                 # Rule 2: Chronic absence / dropout who passes only 1-2 subjects
                 if total_credit_subjects >= 4:
@@ -373,7 +447,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                 
                 # Rule 3: Extreme fluctuation (e.g. gets 4s and also gets 0/ร/มส)
                 if grade_4_count >= 2 and ro_ms_zero_count >= 1:
-                    if not any("ผลการเรียนดี" in a for a in anomalies):
+                    if not any("ผลการเรียนดี" in a or "เรียนร่วม" in a for a in anomalies):
                         anomalies.append(f"เกรดแกว่งมาก: ได้เกรด 4 ({grade_4_count} วิชา) สลับกับติด ร/0 ({ro_ms_zero_count} วิชา)")
 
                 # Rule 4: Passed all subjects but got มผ in activities
@@ -384,6 +458,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
 
                 if anomalies:
                     anomaly_rows_map[row_idx] = anomalies
+                    contacts = list(dict.fromkeys(contacts))
                     issue_obj = {
                         "file": filename,
                         "class_level": class_level,
@@ -392,7 +467,8 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                         "student_name": student_name,
                         "gpa": given_gpa,
                         "issues": anomalies,
-                        "contacts": contacts
+                        "contacts": contacts,
+                        "is_special_ld": bool(ld_info)
                     }
                     all_issues.append(issue_obj)
                     file_anomalies.append(issue_obj)
@@ -452,7 +528,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                     all_subject_issues.append(subj_obj)
 
             df = df.astype(object).fillna('')
-            html_table = generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map)
+            html_table = generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map, special_ld_rows)
             
             file_results.append({
                 "filename": filename,
