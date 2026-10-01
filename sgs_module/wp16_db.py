@@ -3,9 +3,10 @@ import os
 import pandas as pd
 from datetime import datetime
 
-WP16_DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'wp16_pending_tasks.json')
-WP16_EXCEL_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'WP16_งานค้าง_ต้นทาง.xlsx')
-WP16_DESKTOP_FILE = os.path.join(os.environ.get('USERPROFILE', r'C:\Users\peera'), 'Desktop', 'WP16_งานค้าง_ต้นทาง.xlsx')
+WP16_DB_FILE = os.path.join(os.path.dirname(__file__), 'wp16_pending_tasks.json')
+WP16_EXCEL_FILE = os.path.join(os.path.dirname(__file__), 'WP16_งานค้าง_ต้นทาง.xlsx')
+GOOGLE_SPREADSHEET_ID = "1OJh1FUnvLeIPGls4QIlture5f7GbAM0IieO8J5q9LuQ"
+GOOGLE_SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SPREADSHEET_ID}/edit?gid=1367227681#gid=1367227681"
 
 def _load_wp16_db():
     if not os.path.exists(WP16_DB_FILE):
@@ -57,17 +58,10 @@ def _save_wp16_db(data):
             
         with pd.ExcelWriter(WP16_EXCEL_FILE, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='WP16_งานค้าง', index=False)
-            
-        # Copy to Desktop so user can access it immediately
-        try:
-            import shutil
-            shutil.copy2(WP16_EXCEL_FILE, WP16_DESKTOP_FILE)
-        except Exception:
-            pass
     except Exception as e:
-        print(f'Error syncing to origin excel: {e}')
+        print(f'Error syncing to internal excel: {e}')
 
-def save_pending_tasks(teacher_name, subject_code, subject_name, tasks_list, academic_year='2569', semester='1'):
+def save_pending_tasks(teacher_name, subject_code, subject_name, tasks_list, academic_year='2569', semester='1', webhook_url=None):
     db = _load_wp16_db()
     for item in tasks_list:
         stu_id = str(item.get('student_id', '')).strip()
@@ -83,6 +77,15 @@ def save_pending_tasks(teacher_name, subject_code, subject_name, tasks_list, aca
         if is_manual and not final_remark:
             final_remark = '[เพิ่มเอง]'
 
+        grade = str(item.get('old_grade', '') or existing.get('old_grade', '0')).strip()
+        if not final_task:
+            if grade == '0':
+                final_task = 'สอบแก้ตัว'
+            elif grade == 'มส':
+                final_task = 'มส. (ขาดเรียนเกิน 20%)'
+        if not final_remark and grade == 'มส':
+            final_remark = '[มส. ประกาศทางการ]'
+
         db[special_id] = {
             'special_id': special_id,
             'academic_year': str(item.get('academic_year') or academic_year),
@@ -94,7 +97,7 @@ def save_pending_tasks(teacher_name, subject_code, subject_name, tasks_list, aca
             'student_id': stu_id,
             'student_name': item.get('student_name', '') or existing.get('student_name', ''),
             'old_score': str(item.get('old_score', '') if item.get('old_score') is not None else existing.get('old_score', '')),
-            'old_grade': str(item.get('old_grade', '') or existing.get('old_grade', '')),
+            'old_grade': grade,
             'pending_task': final_task,
             'remark': final_remark,
             'is_manual': is_manual,
@@ -105,7 +108,7 @@ def save_pending_tasks(teacher_name, subject_code, subject_name, tasks_list, aca
     # Auto-sync to Google Sheets in background
     try:
         import threading
-        threading.Thread(target=sync_all_accumulated_tasks_to_gas, daemon=True).start()
+        threading.Thread(target=sync_all_accumulated_tasks_to_gas, args=(webhook_url,), daemon=True).start()
     except Exception as e:
         print(f"Failed to start GAS sync thread: {e}")
         
@@ -126,7 +129,9 @@ def sync_all_accumulated_tasks_to_gas(target_gas_url=None):
             'special_id': v.get('special_id') or k,
             'specialId': v.get('special_id') or k,
             'academic_year': yr,
+            'year': yr,
             'semester': sem,
+            'term': sem,
             'year_term': term_str,
             'termStr': term_str,
             'subject_code': v.get('subject_code', ''),
@@ -142,6 +147,7 @@ def sync_all_accumulated_tasks_to_gas(target_gas_url=None):
             'student_name': v.get('student_name', ''),
             'stuName': v.get('student_name', ''),
             'old_score': v.get('old_score', ''),
+            'oldScore': v.get('old_score', ''),
             'old_grade': v.get('old_grade', '0'),
             'oldGrade': v.get('old_grade', '0'),
             'pending_task': v.get('pending_task', ''),
@@ -155,6 +161,8 @@ def sync_all_accumulated_tasks_to_gas(target_gas_url=None):
 
     payload = json.dumps({
         'action': 'sync-wp16-sheet',
+        'spreadsheetId': GOOGLE_SPREADSHEET_ID,
+        'sheetName': 'WP16_งานค้าง',
         'items': items
     })
 
@@ -171,7 +179,7 @@ def sync_all_accumulated_tasks_to_gas(target_gas_url=None):
             gas_json = {'raw': resp.text[:500]}
 
         if isinstance(gas_json, dict) and (gas_json.get('success') or gas_json.get('status') == 'success'):
-            print(f"[GAS SYNC] Successfully synced {len(items)} items to sgsnextschool Google Sheet.")
+            print(f"[GAS SYNC] Successfully synced {len(items)} items to sgsnextschool Google Sheet ({GOOGLE_SPREADSHEET_ID}).")
             return {'status': 'success', 'count': len(items), 'gas_result': gas_json}
         else:
             print(f"[GAS SYNC] GAS returned: {gas_json}")
@@ -185,31 +193,84 @@ def sync_all_accumulated_tasks_to_gas(target_gas_url=None):
         print(f"[GAS SYNC] Error: {e}")
         return {'status': 'error', 'message': str(e), 'count': len(items)}
 
+def fetch_wp16_from_gas(subject_code=None, teacher_name=None):
+    """Fetch stored WP16 records directly from Google Sheet via GAS."""
+    import requests
+    GAS_URL = "https://script.google.com/macros/s/AKfycbxzpP9b_eBJUU5KaNX1CbMOLHygMsrUdO7earro-bQIs8lMS9H6YM6Z6mlamm3jJd1fDQ/exec"
+    params = {"action": "get-wp16"}
+    if subject_code:
+        params["subject_code"] = subject_code
+    # Do not send teacher_name to GAS to avoid strict exact-match filtering in GAS
+    try:
+        resp = requests.get(GAS_URL, params=params, timeout=10)
+        data = resp.json()
+        return data.get("items", [])
+    except Exception as e:
+        print(f"[GAS FETCH] Error fetching wp16 from GAS: {e}")
+        return []
+
 def get_pending_tasks_for_subject(subject_code, teacher_name=None):
-    db = _load_wp16_db()
+    """
+    ดึงรายชื่อนักเรียนที่มีงานค้างสำหรับวิชานี้จาก Google Sheet โดยตรง 100%
+    ไม่มีการอ่านจาก Local DB เลย เพื่อให้รองรับการใช้งานออนไลน์หลายคนพร้อมกัน
+    """
     result = {}
-    for k, v in db.items():
-        if v.get('subject_code') == subject_code:
-            if teacher_name and v.get('teacher_name') != teacher_name:
-                continue
-            result[v.get('student_id')] = v
+    
+    # ดึงจาก Google Sheet (ส่งแค่ subject_code เพื่อไม่ให้ GAS filter ชื่อครูทิ้งถ้าพิมพ์ไม่ตรง)
+    gas_items = fetch_wp16_from_gas(subject_code)
+    
+    for it in gas_items:
+        sid = str(it.get('student_id') or it.get('เลขประจำตัว') or '').strip()
+        if not sid:
+            continue
+            
+        sp = str(it.get('special_id') or it.get('เลขเฉพาะ') or f"{subject_code}{sid}").strip()
+        gas_name = str(it.get('student_name') or it.get('ชื่อ-นามสกุล') or '').strip()
+        
+        result[sid] = {
+            'special_id': sp,
+            'academic_year': str(it.get('academic_year') or it.get('ปีการศึกษา') or '2569'),
+            'semester': str(it.get('semester') or it.get('ภาคเรียน') or '1'),
+            'subject_code': str(it.get('subject_code') or it.get('รหัสวิชา') or subject_code),
+            'subject_name': str(it.get('subject_name') or it.get('ชื่อวิชา') or ''),
+            'teacher_name': str(it.get('teacher_name') or it.get('ครูผู้สอน') or teacher_name or ''),
+            'class_level': str(it.get('class_level') or it.get('ชั้น/ห้อง') or ''),
+            'student_id': sid,
+            'student_name': gas_name,
+            'old_score': str(it.get('old_score') if it.get('old_score') is not None else it.get('คะแนนเดิม', '')),
+            'old_grade': str(it.get('old_grade') or it.get('ผลการเรียนเดิม') or '0'),
+            'pending_task': str(it.get('pending_task') or it.get('งานค้าง') or ''),
+            'remark': str(it.get('remark') or it.get('หมายเหตุ') or ''),
+            'is_manual': bool(it.get('is_manual', False)),
+            'updated_at': str(it.get('updated_at') or it.get('วันที่บันทึก') or ''),
+        }
+        
     return result
 
 def get_all_pending_tasks():
     db = _load_wp16_db()
     return list(db.values())
 
-def remove_pending_task(subject_code, student_id):
+def remove_pending_task(subject_code, student_id, webhook_url=None):
     db = _load_wp16_db()
-    special_id = f'{subject_code}{student_id}'
+    s_code = (subject_code or '').strip()
+    s_id = (student_id or '').strip()
+    special_id = f'{s_code}{s_id}'
+    target_key = None
     if special_id in db:
-        del db[special_id]
+        target_key = special_id
+    else:
+        for k, v in db.items():
+            if str(v.get('subject_code', '')).strip() == s_code and str(v.get('student_id', '')).strip() == s_id:
+                target_key = k
+                break
+    if target_key:
+        del db[target_key]
         _save_wp16_db(db)
         try:
             import threading
-            threading.Thread(target=sync_all_accumulated_tasks_to_gas, daemon=True).start()
+            threading.Thread(target=sync_all_accumulated_tasks_to_gas, args=(webhook_url,), daemon=True).start()
         except Exception:
             pass
         return True
     return False
-
