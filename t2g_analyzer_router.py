@@ -9,8 +9,60 @@ from typing import List
 
 router = APIRouter(prefix="/api/admin/t2g", tags=["admin_t2g"])
 
+GOOGLE_SHEET_TEACHER_URL = "https://docs.google.com/spreadsheets/d/1-FZKnLsskjnzqpwzQ3eFIFX5oUVCwVDFiCzOIjokwL8/export?format=csv&gid=1132324994"
+TEACHER_CACHE_FILE = "teacher_schedule_cache.json"
+_cached_teacher_mapping = {}
+
 def get_teacher_mapping():
+    global _cached_teacher_mapping
+    if _cached_teacher_mapping:
+        return _cached_teacher_mapping
+
     mapping = {}
+    
+    # 1. Try fetching live from Google Sheet (View_ClassTeacher)
+    try:
+        import requests
+        resp = requests.get(GOOGLE_SHEET_TEACHER_URL, timeout=8)
+        if resp.status_code == 200:
+            df = pd.read_csv(io.StringIO(resp.text))
+            for _, row in df.iterrows():
+                c_level = str(row['ชั้น']).strip() if pd.notna(row.get('ชั้น')) else ''
+                c_room = str(row['กลุ่ม-ห้อง']).strip() if pd.notna(row.get('กลุ่ม-ห้อง')) else ''
+                subj = str(row['รหัสวิชา']).strip() if pd.notna(row.get('รหัสวิชา')) else ''
+                pfx = str(row['คำนำหน้า']).strip() if pd.notna(row.get('คำนำหน้า')) else ''
+                first = str(row['ชื่อ']).strip() if pd.notna(row.get('ชื่อ')) else ''
+                last = str(row['นามสกุล']).strip() if pd.notna(row.get('นามสกุล')) else ''
+                tname = f"{pfx}{first} {last}".strip()
+                
+                if subj:
+                    if c_level and c_room:
+                        room_key = f"{c_level}/{c_room}"
+                        mapping[f"{subj}_{room_key}"] = tname
+                    if subj not in mapping:
+                        mapping[subj] = tname
+                        
+            if mapping:
+                _cached_teacher_mapping = mapping
+                try:
+                    with open(TEACHER_CACHE_FILE, "w", encoding="utf-8") as f:
+                        json.dump(mapping, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+                return _cached_teacher_mapping
+    except Exception as e:
+        print(f"Error fetching Google Sheet View_ClassTeacher: {e}")
+
+    # 2. Fallback to local teacher_schedule_cache.json
+    if os.path.exists(TEACHER_CACHE_FILE):
+        try:
+            with open(TEACHER_CACHE_FILE, "r", encoding="utf-8") as f:
+                _cached_teacher_mapping = json.load(f)
+                return _cached_teacher_mapping
+        except Exception:
+            pass
+
+    # 3. Fallback to wp16_pending_tasks.json
     try:
         if os.path.exists("wp16_pending_tasks.json"):
             with open("wp16_pending_tasks.json", "r", encoding="utf-8") as f:
@@ -24,7 +76,9 @@ def get_teacher_mapping():
                         if subj not in mapping:
                             mapping[subj] = teacher
     except Exception as e:
-        print(f"Error loading teacher mapping: {e}")
+        print(f"Error loading fallback teacher mapping: {e}")
+        
+    _cached_teacher_mapping = mapping
     return mapping
 
 def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map):
