@@ -33,6 +33,7 @@ def get_teacher_mapping():
 async def analyze_t2g_files(files: List[UploadFile] = File(...)):
     teacher_mapping = get_teacher_mapping()
     all_issues = []
+    all_files_html = []
     
     for file in files:
         contents = await file.read()
@@ -159,7 +160,20 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                         "contacts": contacts
                     })
                     
+            df.fillna('', inplace=True)
+            html_table = df.to_html(classes="min-w-full text-xs text-left border-collapse border border-gray-200", border=1, index=False, header=False)
+            all_files_html.append({
+                "filename": filename,
+                "class_level": class_level,
+                "html": html_table
+            })
+                    
         except Exception as e:
             all_issues.append({"file": filename, "error": str(e)})
 
-    return {"status": "success", "total_files_processed": len(files), "anomalies": all_issues}
+    return {
+        "status": "success", 
+        "total_files_processed": len(files), 
+        "anomalies": all_issues,
+        "documents": all_files_html
+    }
