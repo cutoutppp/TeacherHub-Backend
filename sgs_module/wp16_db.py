@@ -200,7 +200,8 @@ def fetch_wp16_from_gas(subject_code=None, teacher_name=None):
     params = {"action": "get-wp16"}
     if subject_code:
         params["subject_code"] = subject_code
-    # Do not send teacher_name to GAS to avoid strict exact-match filtering in GAS
+    if teacher_name:
+        params["teacher_name"] = teacher_name
     try:
         resp = requests.get(GAS_URL, params=params, timeout=10)
         data = resp.json()
