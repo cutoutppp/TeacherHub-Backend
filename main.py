@@ -17,12 +17,14 @@ app.add_middleware(
 
 from sgs_module.sgs_router import router as sgs_router
 from moresor_router import router as moresor_router
+from t2g_analyzer_router import router as t2g_analyzer_router
 
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(sgs_router)
 app.include_router(moresor_router)
+app.include_router(t2g_analyzer_router)
 
 @app.get("/")
 def read_root():
