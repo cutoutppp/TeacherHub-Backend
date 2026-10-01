@@ -27,36 +27,97 @@ def get_teacher_mapping():
         print(f"Error loading teacher mapping: {e}")
     return mapping
 
-def generate_preview_html(df, anomaly_rows_map, subject_row_idx):
-    html = ['<div class="overflow-x-auto border border-gray-200 rounded-xl shadow-inner max-h-[650px] overflow-y-auto bg-white"><table class="w-full text-xs text-left border-collapse">']
-    for r_idx in range(len(df)):
-        row = df.iloc[r_idx]
+def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map):
+    # If no student rows or active cols detected, fallback to stripped df
+    if not student_rows or not active_cols:
+        # Drop all completely blank rows and columns
+        clean_df = df.dropna(how='all', axis=0).dropna(how='all', axis=1).astype(object).fillna('')
+        return clean_df.to_html(classes="min-w-full text-xs text-left border-collapse border border-slate-200", border=1, index=False, header=False)
+
+    # Build clean headers
+    headers = []
+    for pos, col in enumerate(active_cols):
+        if pos == 0:
+            headers.append("เลขที่")
+        elif pos == 1:
+            headers.append("เลขประจำตัว")
+        elif pos == 2:
+            headers.append("ชื่อ - นามสกุล")
+        elif pos == 3:
+            headers.append("หน่วยกิต")
+        elif pos == 4:
+            headers.append("GPA")
+        else:
+            # Subject code & credits
+            s_val = str(df.iloc[subject_row_idx, col]).strip()
+            if s_val in ['nan', 'None', '']:
+                s_val = f"วิชา {pos-4}"
+            headers.append(s_val)
+
+    html = [
+        '<div class="overflow-x-auto border border-slate-200 rounded-xl shadow-sm max-h-[650px] overflow-y-auto bg-white">',
+        '<table class="w-full text-xs text-left border-collapse">',
+        '<thead class="bg-slate-100 text-slate-800 font-bold sticky top-0 z-20 shadow-sm border-b-2 border-slate-300">',
+        '<tr>'
+    ]
+
+    for idx, h in enumerate(headers):
+        align = "text-center" if idx in [0, 1, 3, 4] or idx >= 5 else "text-left"
+        sticky_th = ""
+        if idx == 0:
+            sticky_th = "sticky left-0 bg-slate-100 z-30"
+        elif idx == 1:
+            sticky_th = "sticky left-[45px] bg-slate-100 z-30"
+        elif idx == 2:
+            sticky_th = "sticky left-[125px] bg-slate-100 z-30 border-r-2 border-slate-300"
+            
+        html.append(f'<th class="px-3 py-2.5 border border-slate-200 whitespace-nowrap {align} {sticky_th}">{h}</th>')
+    html.append('</tr></thead><tbody>')
+
+    for s_idx, r_idx in enumerate(student_rows):
         is_anomaly = r_idx in anomaly_rows_map
-        is_subject = (r_idx == subject_row_idx)
-        
-        tr_attrs = ""
         if is_anomaly:
             issues_text = " | ".join(anomaly_rows_map[r_idx])
-            tr_attrs = f'class="bg-red-50 hover:bg-red-100 transition-colors border-l-4 border-red-500 font-medium" title="{issues_text}"'
-        elif is_subject:
-            tr_attrs = 'class="bg-slate-100 text-slate-800 font-bold sticky top-0 z-10 border-b-2 border-slate-300 shadow-sm"'
-        elif r_idx < subject_row_idx:
-            tr_attrs = 'class="bg-slate-50 text-slate-600 font-semibold border-b border-gray-100"'
+            tr_class = "bg-red-50 hover:bg-red-100 transition-colors border-l-4 border-red-500 font-medium"
+            tr_attrs = f'class="{tr_class}" title="{issues_text}"'
         else:
-            zebra = "bg-white" if r_idx % 2 == 0 else "bg-slate-50/50"
-            tr_attrs = f'class="{zebra} hover:bg-blue-50/50 border-b border-gray-100 text-slate-700 transition-colors"'
-            
+            zebra = "bg-white" if s_idx % 2 == 0 else "bg-slate-50/60"
+            tr_class = f"{zebra} hover:bg-indigo-50/50 transition-colors border-b border-slate-100 text-slate-700"
+            tr_attrs = f'class="{tr_class}"'
+
         html.append(f'<tr {tr_attrs}>')
-        for c_idx in range(len(df.columns)):
-            val = str(row.iloc[c_idx])
+        for c_pos, col in enumerate(active_cols):
+            val = str(df.iloc[r_idx, col]).strip()
             if val in ['nan', 'None']:
                 val = ''
-            td_class = "px-2.5 py-1.5 border border-gray-200 whitespace-nowrap"
-            if is_anomaly and c_idx in [1, 3, 5, 8]:
-                td_class += " font-bold text-red-600"
-            html.append(f'<td class="{td_class}">{val}</td>')
+            if c_pos in [0, 1]:
+                val = val.replace('.0', '')
+                
+            align = "text-center" if c_pos in [0, 1, 3, 4] or c_pos >= 5 else "text-left"
+            td_class = f"px-2.5 py-1.5 border border-slate-200 whitespace-nowrap {align}"
+            
+            sticky_td = ""
+            if c_pos == 0:
+                sticky_td = f"sticky left-0 { 'bg-red-50' if is_anomaly else 'bg-white' } z-10 font-mono"
+            elif c_pos == 1:
+                sticky_td = f"sticky left-[45px] { 'bg-red-50' if is_anomaly else 'bg-white' } z-10 font-mono"
+            elif c_pos == 2:
+                sticky_td = f"sticky left-[125px] { 'bg-red-50' if is_anomaly else 'bg-white' } z-10 border-r-2 border-slate-300 font-medium"
+            elif c_pos == 4:
+                td_class += " font-bold text-slate-800"
+
+            val_display = val
+            if val in ['0', '0.0', 'ร', 'มส', 'มผ']:
+                val_display = f'<span class="bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded text-[11px] border border-red-200">{val}</span>'
+            elif val in ['4', '4.0']:
+                val_display = f'<span class="font-bold text-indigo-700">{val}</span>'
+            elif val == 'ผ':
+                val_display = f'<span class="text-emerald-600 font-medium">{val}</span>'
+
+            html.append(f'<td class="{td_class} {sticky_td}">{val_display}</td>')
         html.append('</tr>')
-    html.append('</table></div>')
+
+    html.append('</tbody></table></div>')
     return "".join(html)
 
 @router.post("/analyze")
@@ -128,8 +189,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                     break
                     
             if subject_row_idx == -1:
-                # Still output document table even if subjects row not auto-detected
-                html_table = generate_preview_html(df, {}, -1)
+                html_table = generate_clean_preview_html(df, [], [], -1, {})
                 err_msg = "ไม่พบแถวที่ระบุรายวิชาและหน่วยกิต (แสดงข้อมูลดิบด้านล่าง)"
                 all_issues.append({"file": filename, "error": err_msg})
                 file_results.append({
@@ -167,6 +227,16 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                 val = str(df.iloc[i, no_col]).replace('.0', '').strip()
                 if val.isdigit():
                     student_rows.append(i)
+
+            # Find active columns that actually have student data (eliminating empty spacer columns)
+            active_cols = []
+            for col_idx in range(len(df.columns)):
+                has_student_data = any(
+                    str(df.iloc[r, col_idx]).strip() not in ['', 'nan', 'None']
+                    for r in student_rows
+                )
+                if has_student_data:
+                    active_cols.append(col_idx)
 
             anomaly_rows_map = {}
 
@@ -260,7 +330,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                     file_anomalies.append(issue_obj)
                     
             df = df.astype(object).fillna('')
-            html_table = generate_preview_html(df, anomaly_rows_map, subject_row_idx)
+            html_table = generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map)
             
             file_results.append({
                 "filename": filename,
