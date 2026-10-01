@@ -259,7 +259,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                     all_issues.append(issue_obj)
                     file_anomalies.append(issue_obj)
                     
-            df.fillna('', inplace=True)
+            df = df.astype(object).fillna('')
             html_table = generate_preview_html(df, anomaly_rows_map, subject_row_idx)
             
             file_results.append({
