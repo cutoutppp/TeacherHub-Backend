@@ -135,18 +135,22 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                 anomalies = []
                 contacts = []
                 
-                if (given_gpa >= 3.0 or grade_4_count >= (total_credit_subjects * 0.5)) and (ro_ms_zero_count + mopho_count == 1):
+                if (given_gpa >= 2.5 or grade_4_count >= (total_credit_subjects * 0.3)) and (ro_ms_zero_count + mopho_count == 1):
                     subj = fail_subjects_names[0]["subject"]
                     grade = fail_subjects_names[0]["grade"]
-                    anomalies.append(f"เกรดเฉลี่ยสูง (GPA {given_gpa}) แต่ติด {subj} ({grade})")
+                    anomalies.append(f"เกรดเฉลี่ยดี (GPA {given_gpa}) แต่ติด {subj} ({grade})")
                     
                     subj_code = subj.split()[0]
                     teacher = teacher_mapping.get(f"{subj_code}_{class_level}") or teacher_mapping.get(subj_code) or "ไม่พบข้อมูลครูผู้สอน"
                     contacts.append(f"{subj}: ติดต่อ {teacher}")
                     
                 if total_credit_subjects >= 5:
-                    if ro_ms_zero_count >= (total_credit_subjects - 2) and passed_subjects in [1, 2]:
-                        anomalies.append(f"เด็กเสี่ยงออก/ขาดสอบยาว: ติด ร/0 จำนวน {ro_ms_zero_count} วิชา แต่ผ่าน {passed_subjects} วิชา")
+                    if ro_ms_zero_count >= (total_credit_subjects - 4) and ro_ms_zero_count > 0 and passed_subjects in [1, 2, 3]:
+                        anomalies.append(f"ความขัดแย้ง: ติด ร/0/มส {ro_ms_zero_count} วิชา แต่ผ่าน {passed_subjects} วิชา (อาจลืมให้ ร หรือให้เกรดผิด)")
+                
+                # Check for extreme grade variations
+                if grade_4_count > 0 and ro_ms_zero_count > 0 and (grade_4_count + ro_ms_zero_count >= total_credit_subjects - 2):
+                    anomalies.append(f"เกรดแกว่งมาก: ได้เกรด 4 ({grade_4_count} วิชา) สลับกับติด ร/0 ({ro_ms_zero_count} วิชา)")
 
                 if anomalies:
                     all_issues.append({
