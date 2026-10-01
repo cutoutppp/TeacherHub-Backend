@@ -178,6 +178,7 @@ def generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, 
 async def analyze_t2g_files(files: List[UploadFile] = File(...)):
     teacher_mapping = get_teacher_mapping()
     all_issues = []
+    all_subject_issues = []
     all_files_html = []
     file_results = []
     
@@ -383,6 +384,60 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                     all_issues.append(issue_obj)
                     file_anomalies.append(issue_obj)
                     
+            # --- Vertical Anomaly Detection (ระดับรายวิชา / แนวดิ่ง) ---
+            file_subject_anomalies = []
+            for col in active_cols[5:]:
+                s_val = str(df.iloc[subject_row_idx, col]).strip()
+                parts = s_val.split()
+                cred = float(parts[-1]) if len(parts) >= 2 and parts[-1].replace('.', '').isdigit() else 1.0
+                s_code = parts[0] if parts else s_val
+                
+                grades = [str(df.iloc[r, col]).strip() for r in student_rows]
+                valid_grades = [g for g in grades if g not in ['', 'nan', 'None']]
+                empty_count = len(grades) - len(valid_grades)
+                
+                subj_issues = []
+                
+                # 1. Missing grades (ช่องเกรดตกหล่น / ฟันหลอ)
+                if 0 < empty_count < len(student_rows):
+                    missing_indices = [student_rows[idx] for idx, g in enumerate(grades) if g in ['', 'nan', 'None']]
+                    missing_names = [str(df.iloc[r, name_col]).strip() for r in missing_indices[:3]]
+                    extra = f" และอีก {empty_count - 3} คน" if empty_count > 3 else ""
+                    subj_issues.append(f"มีนักเรียนตกหล่นยังไม่กรอกเกรด {empty_count} คน ({', '.join(missing_names)}{extra})")
+                    
+                # 2. Zero Variance (เกรดเหมือนกันทั้งห้อง 100%) - ยกเว้นกิจกรรมที่ได้ ผ
+                if len(valid_grades) >= 10 and len(set(valid_grades)) == 1:
+                    u_grade = valid_grades[0]
+                    if cred < 10 and u_grade != 'ผ':
+                        subj_issues.append(f"เกรดเหมือนกันทั้งห้อง 100% (นักเรียนทุกคนได้เกรด {u_grade} เหมือนกันทั้งหมด {len(valid_grades)} คน)")
+                        
+                # 3. High Failure Rate (อัตราตกสูงผิดปกติ >= 35% และ >= 5 คน)
+                fail_count = sum(g in ['0', '0.0', 'ร', 'มส', 'มผ'] for g in valid_grades)
+                fail_pct = (fail_count / len(valid_grades)) * 100 if valid_grades else 0
+                if fail_pct >= 35 and fail_count >= 5:
+                    subj_issues.append(f"อัตราการตกสูงผิดปกติ: ติด 0/ร/มส จำนวน {fail_count} คน ({fail_pct:.0f}% ของทั้งห้อง)")
+                    
+                # 4. Invalid Evaluation Scale
+                if cred >= 10:
+                    if any(g in ['1', '1.5', '2', '2.5', '3', '3.5', '4', '4.0'] for g in valid_grades):
+                        subj_issues.append("วิชากิจกรรมพัฒนาผู้เรียนแต่ใส่ผลการเรียนเป็นตัวเลข (0-4)")
+                elif cred < 10:
+                    if any(g in ['ผ', 'มผ'] for g in valid_grades):
+                        subj_issues.append("วิชาการมีหน่วยกิตแต่ใส่ผลการเรียนเป็น ผ/มผ")
+
+                if subj_issues:
+                    teacher = teacher_mapping.get(f"{s_code}_{class_level}") or teacher_mapping.get(s_code) or "ไม่พบข้อมูลครูผู้สอน"
+                    subj_obj = {
+                        "file": filename,
+                        "class_level": class_level,
+                        "subject": s_val,
+                        "subject_code": s_code,
+                        "issues": subj_issues,
+                        "teacher": teacher
+                    }
+                    file_subject_anomalies.append(subj_obj)
+                    all_subject_issues.append(subj_obj)
+
             df = df.astype(object).fillna('')
             html_table = generate_clean_preview_html(df, student_rows, active_cols, subject_row_idx, anomaly_rows_map)
             
@@ -391,6 +446,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                 "class_level": class_level,
                 "total_students": len(student_rows),
                 "anomalies": file_anomalies,
+                "subject_anomalies": file_subject_anomalies,
                 "html": html_table,
                 "error": None
             })
@@ -409,6 +465,7 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                 "class_level": class_level,
                 "total_students": 0,
                 "anomalies": [],
+                "subject_anomalies": [],
                 "html": f'<div class="p-6 text-red-600 bg-red-50 rounded-lg">เกิดข้อผิดพลาดในการอ่านไฟล์: {err_msg}</div>',
                 "error": err_msg
             })
@@ -418,5 +475,6 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
         "total_files_processed": len(files), 
         "files": file_results,
         "anomalies": all_issues,
+        "subject_anomalies": all_subject_issues,
         "documents": all_files_html
     }
