@@ -320,14 +320,13 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
             
             # Check Characteristics (char_scores)
             for i, c in enumerate(sgs.get("char_scores", [])):
-                  # Rule 1: ห้ามคะแนนเป็น 0 (เว้นแต่นักเรียนได้เกรด มส, ร, 0, มผ หรือว่าง)
-                  if c in ["0", ""]:
-                      if grade not in ["0", "มส", "มส.", "ร", "มผ", ""]:
-                          results["errors"].append({
-                              "student_id": sid, "name": name, "type": "Characteristic Error",
-                              "message": f"คุณลักษณะข้อที่ {i+1} เป็น {c or 'ว่าง'} (ต้องให้คะแนนอย่างน้อย 1)"
-                          })
-                          add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
+                  # Rule 1: ห้ามคะแนนเป็น 0 (ถ้าเว้นว่างให้ผ่านเลยตามรีเควสต์)
+                  if c == "0":
+                      results["errors"].append({
+                          "student_id": sid, "name": name, "type": "Characteristic Error",
+                          "message": f"คุณลักษณะข้อที่ {i+1} เป็น 0 (ต้องให้คะแนนอย่างน้อย 1 หรือเว้นว่าง)"
+                      })
+                      add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
 
                 # Rules for checked items (3, 4, 6)
                 if i in check_indices:
