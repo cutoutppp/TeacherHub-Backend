@@ -319,88 +319,114 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
             check_indices = {2, 3, 5}
             
             # Check Characteristics (char_scores)
-            for i, c in enumerate(sgs.get("char_scores", [])):
-                  # Rule 1: ห้ามคะแนนเป็น 0 (ถ้าเว้นว่าง ต้องไม่ใช่เกรด 1-4)
-                  if c == "0":
-                      results["errors"].append({
-                          "student_id": sid, "name": name, "type": "Characteristic Error",
-                          "message": f"คุณลักษณะข้อที่ {i+1} เป็น 0 (คะแนนต้องเริ่มที่ 1)"
-                      })
-                      add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
-                  elif c == "":
-                      if grade in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
-                          results["errors"].append({
-                              "student_id": sid, "name": name, "type": "Characteristic Error",
-                              "message": f"เกรด {grade} บังคับว่าต้องประเมินคุณลักษณะ (ปล่อยว่างไม่ได้)"
-                          })
-                          add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
+            char_list = sgs.get("char_scores", [])
+            all_char_zero = len(char_list) > 0 and all(c in ["0", ""] for c in char_list) and any(c == "0" for c in char_list)
 
-                # Rules for checked items (3, 4, 6)
-                if i in check_indices:
-                    # Rule 2: ผลการเรียน มส และ 0 ให้ 1 เท่านั้น
-                    if grade in ["0", "มส"]:
-                        if c not in ["0", ""] and c != "1":
+            if all_char_zero:
+                # ถ้าเป็น 0 ทุกช่อง ให้เหลืองแต่บันทึกได้ (Warning แทน Error)
+                results["warnings"].append({
+                    "student_id": sid, "name": name, "type": "Characteristic Warning",
+                    "message": "คุณลักษณะอันพึงประสงค์เป็น 0 ทุกช่อง (บันทึกผ่านได้)"
+                })
+                for i in range(len(char_list)):
+                    if "char_bboxes" in sgs.get("bboxes", {}) and i < len(sgs["bboxes"]["char_bboxes"]):
+                        add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
+            else:
+                for i, c in enumerate(char_list):
+                    # Rule 1: ห้ามคะแนนเป็น 0 (ถ้าเว้นว่าง ต้องไม่ใช่เกรด 1-4)
+                    if c == "0":
+                        results["errors"].append({
+                            "student_id": sid, "name": name, "type": "Characteristic Error",
+                            "message": f"คุณลักษณะข้อที่ {i+1} เป็น 0 (คะแนนต้องเริ่มที่ 1)"
+                        })
+                        add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
+                    elif c == "":
+                        if grade in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
                             results["errors"].append({
                                 "student_id": sid, "name": name, "type": "Characteristic Error",
-                                "message": f"เกรด {grade} บังคับให้คุณลักษณะข้อที่ {i+1} ต้องเป็น 1 เท่านั้น (ตอนนี้เป็น {c})"
+                                "message": f"เกรด {grade} บังคับว่าต้องประเมินคุณลักษณะ (ปล่อยว่างไม่ได้)"
                             })
                             add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
-                    else:
-                        # Rule 3: ความสอดคล้อง
-                        if grade in ["1", "1.5"]:
-                            if c == "3":
-                                results["warnings"].append({
-                                    "student_id": sid, "name": name, "type": "Consistency Warning",
-                                    "message": f"เกรดต่ำ ({grade}) แต่คุณลักษณะข้อที่ {i+1} สูง ({c})"
+
+                    # Rules for checked items (3, 4, 6)
+                    if i in check_indices:
+                        # Rule 2: ผลการเรียน มส และ 0 ให้ 1 เท่านั้น
+                        if grade in ["0", "มส"]:
+                            if c not in ["0", ""] and c != "1":
+                                results["errors"].append({
+                                    "student_id": sid, "name": name, "type": "Characteristic Error",
+                                    "message": f"เกรด {grade} บังคับให้คุณลักษณะข้อที่ {i+1} ต้องเป็น 1 เท่านั้น (ตอนนี้เป็น {c})"
                                 })
-                                add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
-                        elif grade == "ร":
-                            if c in ["2", "3"]:
-                                results["warnings"].append({
-                                    "student_id": sid, "name": name, "type": "Consistency Warning",
-                                    "message": f"ติด ร ({grade}) แต่คุณลักษณะข้อที่ {i+1} สูง ({c})"
-                                })
-                                add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
-                        elif grade in ["3", "3.5", "4"]:
-                            if c in ["1", "0", ""]:
-                                results["warnings"].append({
-                                    "student_id": sid, "name": name, "type": "Consistency Warning",
-                                    "message": f"เกรดสูง ({grade}) แต่คุณลักษณะข้อที่ {i+1} ต่ำ ({c or 'ว่าง'})"
-                                })
-                                add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
+                                add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
+                        else:
+                            # Rule 3: ความสอดคล้อง
+                            if grade in ["1", "1.5"]:
+                                if c == "3":
+                                    results["warnings"].append({
+                                        "student_id": sid, "name": name, "type": "Consistency Warning",
+                                        "message": f"เกรดต่ำ ({grade}) แต่คุณลักษณะข้อที่ {i+1} สูง ({c})"
+                                    })
+                                    add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
+                            elif grade == "ร":
+                                if c in ["2", "3"]:
+                                    results["warnings"].append({
+                                        "student_id": sid, "name": name, "type": "Consistency Warning",
+                                        "message": f"ติด ร ({grade}) แต่คุณลักษณะข้อที่ {i+1} สูง ({c})"
+                                    })
+                                    add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
+                            elif grade in ["3", "3.5", "4"]:
+                                if c in ["1", "0", ""]:
+                                    results["warnings"].append({
+                                        "student_id": sid, "name": name, "type": "Consistency Warning",
+                                        "message": f"เกรดสูง ({grade}) แต่คุณลักษณะข้อที่ {i+1} ต่ำ ({c or 'ว่าง'})"
+                                    })
+                                    add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "yellow")
 
             # Check Reading/Analytical Thinking (comp_scores)
-            for i, c in enumerate(sgs.get("comp_scores", [])):
-                if c == "" and grade in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
-                    results["errors"].append({
-                        "student_id": sid, "name": name, "type": "Reading/Analytical Error",
-                        "message": f"เกรด {grade} บังคับว่าต้องประเมินอ่านคิดวิเคราะห์ (ปล่อยว่างไม่ได้)"
-                    })
-                    add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "red")
-                    continue
-                
-                if grade in ["1", "1.5"]:
-                    if c == "3":
-                        results["warnings"].append({
-                            "student_id": sid, "name": name, "type": "Consistency Warning",
-                            "message": f"เกรดต่ำ ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} สูง ({c})"
-                        })
-                        add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
-                elif grade in ["0", "ร", "มส"]:
-                    if c in ["2", "3"]:
-                        results["warnings"].append({
-                            "student_id": sid, "name": name, "type": "Consistency Warning",
-                            "message": f"เกรดตก/ติด ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} สูง ({c})"
-                        })
-                        add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
-                elif grade in [\"3\", \"3.5\", \"4\"]:
-                        if c in [\"0\", \"1\"]:
-                        results["warnings"].append({
-                            "student_id": sid, "name": name, "type": "Consistency Warning",
-                            "message": f"เกรดสูง ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} ต่ำ ({c or 'ว่าง'})"
-                        })
-                        add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
+            comp_list = sgs.get("comp_scores", [])
+            all_comp_zero = len(comp_list) > 0 and all(c in ["0", ""] for c in comp_list) and any(c == "0" for c in comp_list)
 
+            if all_comp_zero:
+                # ถ้าเป็น 0 ทุกช่อง ให้เหลืองแต่บันทึกได้ (Warning แทน Error)
+                results["warnings"].append({
+                    "student_id": sid, "name": name, "type": "Reading/Analytical Warning",
+                    "message": "อ่านคิดวิเคราะห์เป็น 0 ทุกช่อง (บันทึกผ่านได้)"
+                })
+                for i in range(len(comp_list)):
+                    if "comp_bboxes" in sgs.get("bboxes", {}) and i < len(sgs["bboxes"]["comp_bboxes"]):
+                        add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
+            else:
+                for i, c in enumerate(comp_list):
+                    if c == "" and grade in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
+                        results["errors"].append({
+                            "student_id": sid, "name": name, "type": "Reading/Analytical Error",
+                            "message": f"เกรด {grade} บังคับว่าต้องประเมินอ่านคิดวิเคราะห์ (ปล่อยว่างไม่ได้)"
+                        })
+                        add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "red")
+                        continue
+                    
+                    if grade in ["1", "1.5"]:
+                        if c == "3":
+                            results["warnings"].append({
+                                "student_id": sid, "name": name, "type": "Consistency Warning",
+                                "message": f"เกรดต่ำ ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} สูง ({c})"
+                            })
+                            add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
+                    elif grade in ["0", "ร", "มส"]:
+                        if c in ["2", "3"]:
+                            results["warnings"].append({
+                                "student_id": sid, "name": name, "type": "Consistency Warning",
+                                "message": f"เกรดตก/ติด ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} สูง ({c})"
+                            })
+                            add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
+                    elif grade in ["3", "3.5", "4"]:
+                        if c in ["0", "1"]:
+                            results["warnings"].append({
+                                "student_id": sid, "name": name, "type": "Consistency Warning",
+                                "message": f"เกรดสูง ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} ต่ำ ({c or 'ว่าง'})"
+                            })
+                            add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
+        
         # 3. Mismatch Check: SGS vs NextSchool Sums (Error)
         for key in score_keys:
             sgs_val_str = sgs.get("scores", {}).get(key, "")
