@@ -6,8 +6,8 @@ from .score_db import get_expected_scores
 _OFFICIAL_MS_CACHE = None
 
 import time
-import requests
 import csv
+import urllib.request
 from io import StringIO
 
 _OFFICIAL_MS_CACHE_TIME = 0
@@ -22,29 +22,30 @@ def _load_official_ms():
     # พยายามโหลดจาก Google Sheet ต้นฉบับล่าสุด
     try:
         url = "https://docs.google.com/spreadsheets/d/1OJh1FUnvLeIPGls4QIlture5f7GbAM0IieO8J5q9LuQ/export?format=csv&gid=1367227681"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            resp.encoding = 'utf-8'
-            reader = csv.reader(StringIO(resp.text))
-            header = next(reader)
-            ms_records = {}
-            for row in reader:
-                if len(row) < 11: continue
-                special_id = row[0].strip()
-                scode = row[3].strip()
-                sid = row[7].strip()
-                old_grade = row[10].strip()
-                if old_grade in ["มส", "มส."]:
-                    ms_records[special_id] = {
-                        "special_id": special_id,
-                        "subject_code": scode,
-                        "student_id": sid,
-                        "pending_task": row[11].strip(),
-                        "remark": row[12].strip() if len(row) > 12 else ""
-                    }
-            _OFFICIAL_MS_CACHE = {"ms_records": ms_records, "allowed_exemptions": {}}
-            _OFFICIAL_MS_CACHE_TIME = time.time()
-            return _OFFICIAL_MS_CACHE
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.getcode() == 200:
+                csv_data = response.read().decode('utf-8')
+                reader = csv.reader(StringIO(csv_data))
+                header = next(reader)
+                ms_records = {}
+                for row in reader:
+                    if len(row) < 11: continue
+                    special_id = row[0].strip()
+                    scode = row[3].strip()
+                    sid = row[7].strip()
+                    old_grade = row[10].strip()
+                    if old_grade in ["มส", "มส."]:
+                        ms_records[special_id] = {
+                            "special_id": special_id,
+                            "subject_code": scode,
+                            "student_id": sid,
+                            "pending_task": row[11].strip(),
+                            "remark": row[12].strip() if len(row) > 12 else ""
+                        }
+                _OFFICIAL_MS_CACHE = {"ms_records": ms_records, "allowed_exemptions": {}}
+                _OFFICIAL_MS_CACHE_TIME = time.time()
+                return _OFFICIAL_MS_CACHE
     except Exception as e:
         print("Failed to fetch GSHEET:", e)
 
@@ -52,6 +53,7 @@ def _load_official_ms():
     if _OFFICIAL_MS_CACHE is not None:
         return _OFFICIAL_MS_CACHE
     
+    import os
     cur_dir = os.path.dirname(__file__)
     candidates = [
         os.path.join(cur_dir, "official_ms_list.json"),
