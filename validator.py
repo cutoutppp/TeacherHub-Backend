@@ -320,13 +320,20 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
             
             # Check Characteristics (char_scores)
             for i, c in enumerate(sgs.get("char_scores", [])):
-                  # Rule 1: ห้ามคะแนนเป็น 0 (ถ้าเว้นว่างให้ผ่านเลยตามรีเควสต์)
+                  # Rule 1: ห้ามคะแนนเป็น 0 (ถ้าเว้นว่าง ต้องไม่ใช่เกรด 1-4)
                   if c == "0":
                       results["errors"].append({
                           "student_id": sid, "name": name, "type": "Characteristic Error",
-                          "message": f"คุณลักษณะข้อที่ {i+1} เป็น 0 (ต้องให้คะแนนอย่างน้อย 1 หรือเว้นว่าง)"
+                          "message": f"คุณลักษณะข้อที่ {i+1} เป็น 0 (คะแนนต้องเริ่มที่ 1)"
                       })
                       add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
+                  elif c == "":
+                      if grade in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
+                          results["errors"].append({
+                              "student_id": sid, "name": name, "type": "Characteristic Error",
+                              "message": f"เกรด {grade} บังคับว่าต้องประเมินคุณลักษณะ (ปล่อยว่างไม่ได้)"
+                          })
+                          add_highlight("sgs", sgs_page, sgs["bboxes"]["char_bboxes"][i], "red")
 
                 # Rules for checked items (3, 4, 6)
                 if i in check_indices:
@@ -364,6 +371,14 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
 
             # Check Reading/Analytical Thinking (comp_scores)
             for i, c in enumerate(sgs.get("comp_scores", [])):
+                if c == "" and grade in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
+                    results["errors"].append({
+                        "student_id": sid, "name": name, "type": "Reading/Analytical Error",
+                        "message": f"เกรด {grade} บังคับว่าต้องประเมินอ่านคิดวิเคราะห์ (ปล่อยว่างไม่ได้)"
+                    })
+                    add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "red")
+                    continue
+                
                 if grade in ["1", "1.5"]:
                     if c == "3":
                         results["warnings"].append({
@@ -378,8 +393,8 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             "message": f"เกรดตก/ติด ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} สูง ({c})"
                         })
                         add_highlight("sgs", sgs_page, sgs["bboxes"]["comp_bboxes"][i], "yellow")
-                elif grade in ["3", "3.5", "4"]:
-                    if c in ["0", "1", ""]:
+                elif grade in [\"3\", \"3.5\", \"4\"]:
+                        if c in [\"0\", \"1\"]:
                         results["warnings"].append({
                             "student_id": sid, "name": name, "type": "Consistency Warning",
                             "message": f"เกรดสูง ({grade}) แต่อ่านคิดฯ ช่องที่ {i+1} ต่ำ ({c or 'ว่าง'})"
