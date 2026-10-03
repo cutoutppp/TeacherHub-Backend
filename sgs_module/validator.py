@@ -553,6 +553,14 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                     add_highlight("sgs", sgs_page, sgs["bboxes"].get("grade"), "red")
                     add_highlight("nextschool", ns_page, ns["bboxes"].get("grade"), "red")
 
+            # -- ตรวจว่าคุณลักษณะ / อ่านคิดวิเคราะห์ เป็น 0 ทุกช่อง (กรณีพิเศษ) --
+            _char_list_chk = sgs.get("char_scores", [])
+            _comp_list_chk = sgs.get("comp_scores", [])
+            _char_comp_all_zero = (
+                (len(_char_list_chk) > 0 and all(c in ["0", ""] for c in _char_list_chk) and any(c == "0" for c in _char_list_chk))
+                or
+                (len(_comp_list_chk) > 0 and all(c in ["0", ""] for c in _comp_list_chk) and any(c == "0" for c in _comp_list_chk))
+            )
             # -- ตรวจว่าคะแนนทุก section ใน SGS เป็น 0 ทั้งหมด (เด็กค้างระบบ ขาดนาน) --
             _sgs_scores = sgs.get("scores", {})
             _sgs_section_vals = [_sgs_scores.get(s, "") for s in ("before_mid", "mid", "after_mid")]
@@ -563,14 +571,6 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
             _skip_rule61 = _char_comp_all_zero or _all_sgs_scores_zero
             # Rule 6.1: เกรด 0-4 ทุกช่องต้องผ่านครึ่ง
             # ใช้เกรดจาก SGS เป็นหลักในการตัดสิน
-            # -- ตรวจว่าคุณลักษณะ / อ่านคิดวิเคราะห์ เป็น 0 ทุกช่อง (กรณีพิเศษ) --
-            _char_list_chk = sgs.get("char_scores", [])
-            _comp_list_chk = sgs.get("comp_scores", [])
-            _char_comp_all_zero = (
-                (len(_char_list_chk) > 0 and all(c in ["0", ""] for c in _char_list_chk) and any(c == "0" for c in _char_list_chk))
-                or
-                (len(_comp_list_chk) > 0 and all(c in ["0", ""] for c in _comp_list_chk) and any(c == "0" for c in _comp_list_chk))
-            )
             if sgs_grade_raw in ["0", "1", "1.5", "2", "2.5", "3", "3.5", "4"]:
                 sections = [("before_mid", "ก่อนกลางภาค"), ("mid", "กลางภาค"), ("after_mid", "หลังกลางภาค")]
                 for sec, sec_name in sections:
