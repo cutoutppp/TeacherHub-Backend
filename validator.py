@@ -582,6 +582,14 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             })
                             add_highlight(g_source, g_page, bboxes.get("grade"), "red")
 
+            # -- ตรวจว่าคะแนนทุก section ใน SGS เป็น 0 ทั้งหมด (เด็กค้างระบบ ขาดนาน) --
+            _sgs_scores = sgs.get("scores", {})
+            _sgs_section_vals = [_sgs_scores.get(s, "") for s in ("before_mid", "mid", "after_mid")]
+            _all_sgs_scores_zero = (
+                all(str(v).strip() in ("0", "0.0", "") for v in _sgs_section_vals)
+                and any(str(v).strip() in ("0", "0.0") for v in _sgs_section_vals)
+            )
+            _skip_rule61 = _char_comp_all_zero or _all_sgs_scores_zero
             # Rule 6.1: เกรด 0-4 ทุกช่องต้องผ่านครึ่ง
             # ใช้เกรดจาก SGS เป็นหลักในการตัดสิน
             # -- ตรวจว่าคุณลักษณะ / อ่านคิดวิเคราะห์ เป็น 0 ทุกช่อง (กรณีพิเศษ) --
@@ -592,7 +600,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                 or
                 (len(_comp_list_chk) > 0 and all(c in ["0", ""] for c in _comp_list_chk) and any(c == "0" for c in _comp_list_chk))
             )
-            if sgs_grade_raw in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
+            if sgs_grade_raw in ["0", "1", "1.5", "2", "2.5", "3", "3.5", "4"]:
                 sections = [("before_mid", "ก่อนกลางภาค"), ("mid", "กลางภาค"), ("after_mid", "หลังกลางภาค")]
                 for sec, sec_name in sections:
                     sec_max = ns_max_scores.get(f"{sec}_sum", 0)
@@ -603,7 +611,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             sgs_val = float(sgs_val_str) if sgs_val_str else 0
                         except ValueError:
                             sgs_val = 0
-                        if sgs_val < (sec_max / 2) and not _char_comp_all_zero:
+                        if sgs_val < (sec_max / 2) and not _skip_rule61:
                             results["errors"].append({
                                 "student_id": sid, "name": name, "type": "Grade Rule Violation",
                                 "message": f"SGS: เกรด {sgs_grade_raw} แต่คะแนน{sec_name} ({sgs_val}) ไม่ผ่านครึ่งของ {sec_max}"
@@ -616,7 +624,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             ns_val = float(ns_val_str) if ns_val_str else 0
                         except ValueError:
                             ns_val = 0
-                        if ns_val < (sec_max / 2) and not _char_comp_all_zero:
+                        if ns_val < (sec_max / 2) and not _skip_rule61:
                             results["errors"].append({
                                 "student_id": sid, "name": name, "type": "Grade Rule Violation",
                                 "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ยอดรวม{sec_name} ({ns_val}) ไม่ผ่านครึ่งของ {sec_max}"
@@ -638,7 +646,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                                             display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
                                         except (ValueError, IndexError):
                                             display_name = f"หน่วยที่ {unit_num}"
-                                        if not _char_comp_all_zero:
+                                        if not _skip_rule61:
                                             results["errors"].append({
                                                 "student_id": sid, "name": name, "type": "Grade Rule Violation",
                                                 "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ช่องย่อย {display_name} ({sec_name}) ได้ ({val_sub}) ไม่ผ่านครึ่งของ {full_sub}"
