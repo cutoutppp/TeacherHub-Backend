@@ -592,7 +592,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                 or
                 (len(_comp_list_chk) > 0 and all(c in ["0", ""] for c in _comp_list_chk) and any(c == "0" for c in _comp_list_chk))
             )
-            if sgs_grade_raw in ["0", "1", "1.5", "2", "2.5", "3", "3.5", "4"]:
+            if sgs_grade_raw in ["1", "1.5", "2", "2.5", "3", "3.5", "4"]:
                 sections = [("before_mid", "ก่อนกลางภาค"), ("mid", "กลางภาค"), ("after_mid", "หลังกลางภาค")]
                 for sec, sec_name in sections:
                     sec_max = ns_max_scores.get(f"{sec}_sum", 0)
