@@ -574,19 +574,12 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             sgs_val = float(sgs_val_str) if sgs_val_str else 0
                         except ValueError:
                             sgs_val = 0
-                        if sgs_val < (sec_max / 2):
-                            if _char_comp_all_zero:
-                                results["warnings"].append({
-                                    "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                                    "message": f"SGS: เกรด {sgs_grade_raw} แต่คะแนน{sec_name} ({sgs_val}) ไม่ผ่านครึ่งของ {sec_max} (คุณลักษณะ/อ่านคิดฯ เป็น 0 ทุกช่อง — บันทึกผ่านได้)"
-                                })
-                                add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "yellow")
-                            else:
-                                results["errors"].append({
-                                    "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                                    "message": f"SGS: เกรด {sgs_grade_raw} แต่คะแนน{sec_name} ({sgs_val}) ไม่ผ่านครึ่งของ {sec_max}"
-                                })
-                                add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "red")
+                        if sgs_val < (sec_max / 2) and not _char_comp_all_zero:
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                "message": f"SGS: เกรด {sgs_grade_raw} แต่คะแนน{sec_name} ({sgs_val}) ไม่ผ่านครึ่งของ {sec_max}"
+                            })
+                            add_highlight("sgs", sgs_page, sgs["bboxes"].get(sec), "red")
 
                         # --- NextSchool: ตรวจยอดรวม ---
                         ns_val_str = ns.get("sums", {}).get(sec, "0")
@@ -594,19 +587,12 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                             ns_val = float(ns_val_str) if ns_val_str else 0
                         except ValueError:
                             ns_val = 0
-                        if ns_val < (sec_max / 2):
-                            if _char_comp_all_zero:
-                                results["warnings"].append({
-                                    "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                                    "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ยอดรวม{sec_name} ({ns_val}) ไม่ผ่านครึ่งของ {sec_max} (คุณลักษณะ/อ่านคิดฯ เป็น 0 ทุกช่อง — บันทึกผ่านได้)"
-                                })
-                                add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sum"), "yellow")
-                            else:
-                                results["errors"].append({
-                                    "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                                    "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ยอดรวม{sec_name} ({ns_val}) ไม่ผ่านครึ่งของ {sec_max}"
-                                })
-                                add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sum"), "red")
+                        if ns_val < (sec_max / 2) and not _char_comp_all_zero:
+                            results["errors"].append({
+                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
+                                "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ยอดรวม{sec_name} ({ns_val}) ไม่ผ่านครึ่งของ {sec_max}"
+                            })
+                            add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sum"), "red")
 
                         # --- NextSchool: ตรวจแต่ละช่องย่อย ---
                         subs = ns.get("subs", {}).get(sec, {})
@@ -623,13 +609,7 @@ def validate_scores(sgs_data, nextschool_data, round_type="final", ms_list=None)
                                             display_name = f"'{header_name}'" if header_name else f"หน่วยที่ {unit_num}"
                                         except (ValueError, IndexError):
                                             display_name = f"หน่วยที่ {unit_num}"
-                                        if _char_comp_all_zero:
-                                            results["warnings"].append({
-                                                "student_id": sid, "name": name, "type": "Grade Rule Violation",
-                                                "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ช่องย่อย {display_name} ({sec_name}) ได้ ({val_sub}) ไม่ผ่านครึ่งของ {full_sub} (คุณลักษณะ/อ่านคิดฯ เป็น 0 ทุกช่อง — บันทึกผ่านได้)"
-                                            })
-                                            add_highlight("nextschool", ns_page, ns["bboxes"].get(f"{sec}_sub_{sub_idx}"), "yellow")
-                                        else:
+                                        if not _char_comp_all_zero:
                                             results["errors"].append({
                                                 "student_id": sid, "name": name, "type": "Grade Rule Violation",
                                                 "message": f"NextSchool: เกรด {sgs_grade_raw} แต่ช่องย่อย {display_name} ({sec_name}) ได้ ({val_sub}) ไม่ผ่านครึ่งของ {full_sub}"
