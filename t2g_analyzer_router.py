@@ -427,26 +427,48 @@ async def analyze_t2g_files(files: List[UploadFile] = File(...)):
                             teacher = teacher_mapping.get(f"{subj_code}_{class_level}") or teacher_mapping.get(subj_code) or "ไม่พบข้อมูลครูผู้สอน"
                             contacts.append(f"{subj}: ติดต่อ {teacher}")
 
-                # Rule 1: Good overall student who failed only 1-2 subjects
-                if (given_gpa >= 2.0 or grade_4_count >= 2) and (1 <= (ro_ms_zero_count + mopho_count) <= 2):
+                good_grade_subjects = []
+                for col_idx, (subj, cred) in subjects.items():
+                    grade_val = str(df.iloc[row_idx, col_idx]).strip()
+                    if grade_val in ['nan', 'None', '']: continue
+                    try:
+                        ng = float(grade_val)
+                        if ng >= 2.5 and cred < 10:
+                            good_grade_subjects.append({"subject": subj, "grade": grade_val})
+                    except:
+                        pass
+
+                fail_pct = round((ro_ms_zero_count / total_credit_subjects * 100), 1) if total_credit_subjects > 0 else 0
+                pass_pct = round((passed_subjects / total_credit_subjects * 100), 1) if total_credit_subjects > 0 else 0
+
+                # Rule 1: ผลการเรียนดีส่วนใหญ่ (ผ่าน >= 80% หรือ GPA >= 2.50) แต่มีหลุดติด 0/ร/มส เพียง 1-2 วิชา (<= 20%)
+                if (pass_pct >= 80.0 or given_gpa >= 2.50 or grade_4_count >= 2) and (1 <= (ro_ms_zero_count + mopho_count) <= 2) and fail_pct <= 20.0:
                     for f_subj in fail_subjects_names + mopho_subjects_names:
                         s_name = f_subj["subject"]
                         s_grade = f_subj["grade"]
                         if not any(s_name in a for a in anomalies):
-                            anomalies.append(f"ผลการเรียนดี (GPA {given_gpa} / เกรด 4 ได้ {grade_4_count} วิชา) แต่ติด {s_name} ({s_grade})")
+                            anomalies.append(f"ผลการเรียนดีส่วนใหญ่ (ผ่าน {pass_pct}% / GPA {given_gpa}) แต่สะดุดติด {s_name} ({s_grade})")
                             subj_code = s_name.split()[0]
                             teacher = teacher_mapping.get(f"{subj_code}_{class_level}") or teacher_mapping.get(subj_code) or "ไม่พบข้อมูลครูผู้สอน"
                             contacts.append(f"{s_name}: ติดต่อ {teacher}")
                     
-                # Rule 2: Chronic absence / dropout who passes only 1-2 subjects
-                if total_credit_subjects >= 4:
-                    if ro_ms_zero_count >= (total_credit_subjects - 3) and ro_ms_zero_count > 0 and passed_subjects in [1, 2]:
-                        anomalies.append(f"เด็กเสี่ยงออก/ขาดสอบยาว: ติด ร/0/มส {ro_ms_zero_count} วิชา แต่ผ่าน {passed_subjects} วิชา")
+                # Rule 2: ติด 0/ร/มส สูงมาก (>= 80%) ขาดสอบ/ไม่มาเรียนยาว แต่ดันมีวิชาที่ได้เกรดดี (>= 2.5 หรือ 3-4)
+                if total_credit_subjects >= 4 and fail_pct >= 80.0 and len(good_grade_subjects) > 0:
+                    good_subjs_str = ", ".join([f"{g['subject']} ({g['grade']})" for g in good_grade_subjects])
+                    anomalies.append(f"ติด 0/ร/มส สูงถึง {fail_pct}% ({ro_ms_zero_count}/{total_credit_subjects} วิชา) แต่มีวิชาที่ได้เกรดดี: {good_subjs_str} (ควรตรวจว่าใส่คะแนนผิดคนหรือไม่)")
+                    for g in good_grade_subjects:
+                        g_code = g["subject"].split()[0]
+                        teacher = teacher_mapping.get(f"{g_code}_{class_level}") or teacher_mapping.get(g_code) or "ไม่พบข้อมูลครูผู้สอน"
+                        contacts.append(f"{g['subject']}: ติดต่อ {teacher}")
+
+                # Rule 2.1: เด็กขาดสอบยาว ติด 0/ร/มส เกือบทั้งตาราง (>= 75%) และผ่านเพียง 1-2 วิชา
+                elif total_credit_subjects >= 4 and fail_pct >= 75.0 and passed_subjects in [1, 2]:
+                    anomalies.append(f"เด็กเสี่ยงออก/ขาดสอบยาว: ติด 0/ร/มส ถึง {fail_pct}% ({ro_ms_zero_count} วิชา) แต่ผ่าน {passed_subjects} วิชา")
                 
-                # Rule 3: Extreme fluctuation (e.g. gets 4s and also gets 0/ร/มส)
+                # Rule 3: Extreme fluctuation (เกรด 4 หลายวิชาสลับกับติด 0/ร/มส)
                 if grade_4_count >= 2 and ro_ms_zero_count >= 1:
-                    if not any("ผลการเรียนดี" in a or "เรียนร่วม" in a for a in anomalies):
-                        anomalies.append(f"เกรดแกว่งมาก: ได้เกรด 4 ({grade_4_count} วิชา) สลับกับติด ร/0 ({ro_ms_zero_count} วิชา)")
+                    if not any("ผลการเรียนดี" in a or "เรียนร่วม" in a or "สูงถึง" in a for a in anomalies):
+                        anomalies.append(f"เกรดแกว่งมาก: ได้เกรด 4 ({grade_4_count} วิชา) สลับกับติด 0/ร/มส ({ro_ms_zero_count} วิชา, {fail_pct}%)")
 
                 # Rule 4: Passed all subjects but got มผ in activities
                 if ro_ms_zero_count == 0 and mopho_count >= 1 and not anomalies:
