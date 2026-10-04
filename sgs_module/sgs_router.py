@@ -28,7 +28,8 @@ async def compare_pdfs(
     files: list[UploadFile] = File(...),
     round_type: str = Form("final"),
     master_scores: str = Form(None),
-    ms_file: UploadFile = File(None)
+    ms_file: UploadFile = File(None),
+    bypass_secret: str = Form(None)
 ):
     ms_list = set()
     if ms_file:
@@ -172,9 +173,9 @@ async def compare_pdfs(
                         fill_color = (1, 0.95, 0.7)
                     page.draw_rect(rect, color=color, width=2, fill=fill_color, fill_opacity=0.4)
                     
-                pix = page.get_pixmap(dpi=150)
-                base64_img = base64.b64encode(pix.tobytes("png")).decode('utf-8')
-                result_images.append(f"data:image/png;base64,{base64_img}")
+                pix = page.get_pixmap(dpi=100)
+                base64_img = base64.b64encode(pix.tobytes("jpeg")).decode('utf-8')
+                result_images.append(f"data:image/jpeg;base64,{base64_img}")
                 
             # ส่งกลับไฟล์ต้นฉบับแทนไฟล์ที่ผ่านการวาดกล่องทับ เพื่อป้องกันปัญหาไฟล์เสีย
             doc.close()
@@ -184,6 +185,15 @@ async def compare_pdfs(
         pair_results = []
         for sgs, ns in pairs:
             results = validate_scores(sgs["data"], ns["data"], round_type=round_type, ms_list=ms_list)
+
+            # ── Admin Bypass: แปลง errors ทั้งหมดเป็น warnings ──────────────
+            import os
+            _bypass_key = os.environ.get("BYPASS_SECRET", "admin9988")
+            if bypass_secret and bypass_secret == _bypass_key:
+                for err in results.get("errors", []):
+                    err["message"] = "⚡ [Bypass] " + err.get("message", "")
+                    results.setdefault("warnings", []).append(err)
+                results["errors"] = []
             
             sgs_images, sgs_pdf_b64 = render_annotated_pdf(sgs["content"], results.get("sgs_highlights", []))
             

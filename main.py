@@ -15,6 +15,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 from sgs_module.sgs_router import router as sgs_router
 from moresor_router import router as moresor_router
 from t2g_analyzer_router import router as t2g_analyzer_router
