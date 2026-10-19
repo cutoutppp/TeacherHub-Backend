@@ -1,8 +1,9 @@
 from urllib.parse import quote
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
 from fastapi.responses import Response
 import io
 import base64
+from security import require_admin
 
 from .parser import parse_sgs_pdf, parse_nextschool_excel
 from .validator import validate_scores
@@ -742,7 +743,7 @@ async def api_export_wp25_group_saved(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/api/admin/wp16-sync-status")
+@router.get("/api/admin/wp16-sync-status", dependencies=[Depends(require_admin)])
 async def get_wp16_sync_status():
     try:
         tasks = get_all_pending_tasks()
@@ -755,7 +756,7 @@ async def get_wp16_sync_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/api/admin/sync-wp16-to-gas")
+@router.post("/api/admin/sync-wp16-to-gas", dependencies=[Depends(require_admin)])
 async def admin_sync_wp16():
     try:
         result = sync_all_accumulated_tasks_to_gas()

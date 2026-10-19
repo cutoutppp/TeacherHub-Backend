@@ -37,12 +37,20 @@ from sgs_module.sgs_router import router as sgs_router
 from moresor_router import router as moresor_router
 from t2g_analyzer_router import router as t2g_analyzer_router
 
+from fastapi import Depends
+from security import get_current_user, require_admin
+
+# Unprotected routes (auth and root)
 app.include_router(auth_router)
-app.include_router(dashboard_router)
-app.include_router(admin_router)
-app.include_router(sgs_router)
-app.include_router(moresor_router)
-app.include_router(t2g_analyzer_router)
+
+# User routes (protected by get_current_user, log-only in Phase 1)
+app.include_router(dashboard_router, dependencies=[Depends(get_current_user)])
+app.include_router(moresor_router, dependencies=[Depends(get_current_user)])
+app.include_router(sgs_router, dependencies=[Depends(get_current_user)])
+
+# Admin routes (protected by require_admin, log-only in Phase 1)
+app.include_router(admin_router, dependencies=[Depends(require_admin)])
+app.include_router(t2g_analyzer_router, dependencies=[Depends(require_admin)])
 
 @app.get("/")
 def read_root():

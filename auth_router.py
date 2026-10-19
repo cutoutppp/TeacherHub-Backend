@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+import os
 import jwt
 from auth_db import get_db, Teacher, verify_pin, get_pin_hash
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-SECRET_KEY = "super-secret-key-teacher-hub" # In production, use env variable
+# ตั้งค่า JWT_SECRET_KEY บน Render/Cloud Run (ค่าเดียวกันทั้งสองที่); ถ้าไม่ตั้งจะใช้ค่าเดิมเพื่อไม่ให้ระบบล่ม
+SECRET_KEY = os.getenv("JWT_SECRET_KEY") or "super-secret-key-teacher-hub"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
