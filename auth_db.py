@@ -5,8 +5,12 @@ import json
 from pydantic import BaseModel
 from typing import Optional
 import ssl
+import os
 
 MASTERDATA_GAS_URL = "https://script.google.com/macros/s/AKfycbwgO1B9LfXkGJNpDei8--Tqt8HkwVOL9yb6jnAG5MOzQVQzZGxAOJTM-wRWxo_vgTgfgw/exec"
+# คีย์ลับที่ GAS ใช้ตรวจว่าเป็น backend จริง (ตั้งค่าเดียวกันใน Script Properties ของ GAS)
+# ถ้าไม่ตั้งจะไม่ส่ง key ไป — พฤติกรรมเหมือนเดิม
+MASTERDATA_API_KEY = os.getenv("MASTERDATA_API_KEY", "")
 
 ADMIN_TEACCODES = {'444', '440', '242', '842', '234'}
 
@@ -49,7 +53,10 @@ class MasterDatabase:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            req = urllib.request.Request(f"{self.url}?action=get_all_teachers", method='GET')
+            query = "action=get_all_teachers"
+            if MASTERDATA_API_KEY:
+                query += "&key=" + urllib.parse.quote(MASTERDATA_API_KEY)
+            req = urllib.request.Request(f"{self.url}?{query}", method='GET')
             with urllib.request.urlopen(req, context=ctx) as response:
                 body = response.read().decode('utf-8')
                 data = json.loads(body)
@@ -121,6 +128,7 @@ class MasterDatabase:
             
             payload = json.dumps({
                 "action": "update_pin",
+                "key": MASTERDATA_API_KEY,
                 "payload": {
                     "userid": str(userid),
                     "new_pin": new_pin
@@ -145,6 +153,7 @@ class MasterDatabase:
             
             payload = json.dumps({
                 "action": "add_teacher",
+                "key": MASTERDATA_API_KEY,
                 "payload": {
                     "UserID": teacher.userid,
                     "PIN": teacher.pin_hash,
