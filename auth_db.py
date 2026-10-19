@@ -6,6 +6,8 @@ from pydantic import BaseModel
 from typing import Optional
 import ssl
 import os
+import time
+import secrets
 
 MASTERDATA_GAS_URL = "https://script.google.com/macros/s/AKfycbwgO1B9LfXkGJNpDei8--Tqt8HkwVOL9yb6jnAG5MOzQVQzZGxAOJTM-wRWxo_vgTgfgw/exec"
 # คีย์ลับที่ GAS ใช้ตรวจว่าเป็น backend จริง (ตั้งค่าเดียวกันใน Script Properties ของ GAS)
@@ -25,9 +27,46 @@ class Teacher(BaseModel):
     subjectgroup: str
     is_admin: bool = False
 
+def is_temp_pin(stored_pin: str) -> bool:
+    """Check if stored PIN is a temporary PIN (prefix TMP:<expiry>:<bcrypt>)"""
+    return bool(stored_pin and stored_pin.startswith("TMP:"))
+
+def parse_temp_pin(stored_pin: str) -> tuple[int, str]:
+    """Parse (expiry_timestamp, bcrypt_hash) from TMP:<expiry>:<bcrypt>"""
+    parts = stored_pin.split(":", 2)
+    if len(parts) == 3:
+        try:
+            return int(parts[1]), parts[2]
+        except ValueError:
+            pass
+    return 0, ""
+
+def is_temp_pin_expired(stored_pin: str) -> bool:
+    """Returns True if the temporary PIN has passed its expiry timestamp"""
+    if not is_temp_pin(stored_pin):
+        return False
+    expiry, _ = parse_temp_pin(stored_pin)
+    return time.time() > expiry
+
+def create_temp_pin(valid_hours: int = 24) -> tuple[str, str]:
+    """Generates (raw_6digit_pin, stored_tmp_format) with 24h expiration"""
+    raw_pin = f"{secrets.randbelow(1000000):06d}"
+    expiry = int(time.time() + (valid_hours * 3600))
+    hashed = get_pin_hash(raw_pin)
+    stored = f"TMP:{expiry}:{hashed}"
+    return raw_pin, stored
+
 def verify_pin(plain_pin: str, hashed_pin: str) -> bool:
     if not hashed_pin or not plain_pin:
         return False
+    if is_temp_pin(hashed_pin):
+        expiry, b_hash = parse_temp_pin(hashed_pin)
+        if time.time() > expiry:
+            return False
+        try:
+            return bcrypt.checkpw(plain_pin.encode('utf-8'), b_hash.encode('utf-8'))
+        except Exception:
+            return plain_pin == b_hash
     try:
         return bcrypt.checkpw(plain_pin.encode('utf-8'), hashed_pin.encode('utf-8'))
     except Exception:
@@ -115,12 +154,6 @@ class MasterDatabase:
         if not self.url or self.url == "INSERT_GAS_URL_HERE":
             return False
             
-        # Update local cache immediately
-        for t in self._cache:
-            if t.userid == str(userid):
-                t.pin_hash = new_pin
-                break
-                
         try:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
@@ -137,7 +170,15 @@ class MasterDatabase:
             req = urllib.request.Request(self.url, data=payload, method='POST', headers={'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, context=ctx) as response:
                 res = json.loads(response.read().decode('utf-8'))
-                return res.get('status') == 'success'
+                if res.get('status') == 'success':
+                    for t in self._cache:
+                        if t.userid == str(userid):
+                            t.pin_hash = new_pin
+                            break
+                    return True
+                else:
+                    print(f"Error from GAS update_pin: {res}")
+                    return False
         except Exception as e:
             print(f"Error updating PIN: {e}")
             return False

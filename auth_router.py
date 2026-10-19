@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 import os
 import jwt
-from auth_db import get_db, Teacher, verify_pin, get_pin_hash
+from auth_db import get_db, Teacher, verify_pin, get_pin_hash, is_temp_pin, is_temp_pin_expired
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -46,19 +46,31 @@ def login(request: LoginRequest, db = Depends(get_db)):
             detail="Incorrect username or password",
         )
 
-    default_pin1 = idCard[-6:] if len(idCard) >= 6 else "123456"
-    default_pin2 = "123456"
-    
-    is_default = (teacher.pin_hash == "" or 
-                  verify_pin(default_pin1, teacher.pin_hash) or 
-                  verify_pin(default_pin2, teacher.pin_hash))
-
-    if pin == "" and is_default:
+    # 1. First time login: only when PIN is completely empty
+    if teacher.pin_hash == "":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="FIRST_TIME_LOGIN"
         )
 
+    # 2. Temporary PIN: must change PIN before access token is granted
+    if is_temp_pin(teacher.pin_hash):
+        if is_temp_pin_expired(teacher.pin_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="รหัส PIN ชั่วคราวหมดอายุแล้ว (เกิน 24 ชั่วโมง) กรุณาติดต่อแอดมินเพื่อขอรีเซ็ตใหม่"
+            )
+        if verify_pin(pin, teacher.pin_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="MUST_CHANGE_PIN"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+        )
+
+    # 3. Standard PIN verification
     if not verify_pin(pin, teacher.pin_hash):
         print(f"[LOGIN FAILED] PIN mismatch for {idCard}")
         raise HTTPException(
@@ -66,7 +78,6 @@ def login(request: LoginRequest, db = Depends(get_db)):
             detail="Incorrect username or password",
         )
 
-    
     # Create token payload
     teacher_data = {
         "id": teacher.id,
@@ -90,27 +101,90 @@ class FirstTimeRequest(BaseModel):
 
 @router.post("/first-time-setup")
 def first_time_setup(request: FirstTimeRequest, db = Depends(get_db)):
-    teacher = db.get_teacher_by_userid(request.idCard)
+    idCard = request.idCard.strip()
+    newPin = request.newPin.strip()
+
+    teacher = db.get_teacher_by_userid(idCard)
     if not teacher:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลในระบบ กรุณาติดต่อแอดมินเพื่อเพิ่มรายชื่อ")
     
-    # Check if they are using default PIN (last 6 digits of ID Card or 123456)
-    default_pin1 = request.idCard[-6:] if len(request.idCard) >= 6 else "123456"
-    default_pin2 = "123456"
+    # Allow ONLY if pin_hash is genuinely empty
+    if teacher.pin_hash != "":
+        raise HTTPException(
+            status_code=400,
+            detail="คุณเคยตั้งรหัส PIN แล้ว หรือมีรหัสในระบบแล้ว กรุณาเข้าสู่ระบบด้วยรหัสของคุณ"
+        )
     
-    is_default = (teacher.pin_hash == "" or 
-                  verify_pin(default_pin1, teacher.pin_hash) or 
-                  verify_pin(default_pin2, teacher.pin_hash))
+    # Validation rules for new PIN
+    if not (len(newPin) == 6 and newPin.isdigit()):
+        raise HTTPException(status_code=400, detail="รหัส PIN ใหม่ต้องเป็นตัวเลข 6 หลักเท่านั้น")
     
-    if not is_default:
-        raise HTTPException(status_code=400, detail="คุณได้ตั้งรหัส PIN ไปแล้ว กรุณาเข้าสู่ระบบด้วยรหัสของคุณ")
+    if newPin == "123456":
+        raise HTTPException(status_code=400, detail="ไม่อนุญาตให้ใช้รหัส 123456 กรุณาตั้งรหัสที่มีความปลอดภัย")
+    
+    if len(idCard) >= 6 and newPin == idCard[-6:]:
+        raise HTTPException(status_code=400, detail="ไม่อนุญาตให้ใช้เลข 6 ตัวท้ายของบัตรประชาชน")
     
     # Set new PIN
-    new_hash = get_pin_hash(request.newPin)
+    new_hash = get_pin_hash(newPin)
+    success = db.update_pin(idCard, new_hash)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="ไม่สามารถบันทึกรหัสผ่านใหม่ลงระบบได้ กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ"
+        )
     teacher.pin_hash = new_hash
-    db.update_pin(request.idCard, new_hash)
     
     return {"status": "success", "message": "ตั้งรหัส PIN สำเร็จ!"}
+
+class ChangePinRequest(BaseModel):
+    idCard: str
+    currentPin: str
+    newPin: str
+
+@router.post("/change-pin")
+def change_pin(request: ChangePinRequest, db = Depends(get_db)):
+    idCard = request.idCard.strip()
+    currentPin = request.currentPin.strip()
+    newPin = request.newPin.strip()
+
+    teacher = db.get_teacher_by_userid(idCard)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลในระบบ")
+
+    # Check current PIN validity (including temporary PIN expiry)
+    if is_temp_pin(teacher.pin_hash) and is_temp_pin_expired(teacher.pin_hash):
+        raise HTTPException(
+            status_code=400,
+            detail="รหัส PIN ชั่วคราวหมดอายุแล้ว (เกิน 24 ชั่วโมง) กรุณาติดต่อแอดมินเพื่อขอรีเซ็ตใหม่"
+        )
+
+    if not verify_pin(currentPin, teacher.pin_hash):
+        raise HTTPException(status_code=400, detail="รหัส PIN เดิมหรือรหัสชั่วคราวไม่ถูกต้อง")
+
+    # Validation rules for new PIN
+    if not (len(newPin) == 6 and newPin.isdigit()):
+        raise HTTPException(status_code=400, detail="รหัส PIN ใหม่ต้องเป็นตัวเลข 6 หลักเท่านั้น")
+
+    if newPin == currentPin:
+        raise HTTPException(status_code=400, detail="รหัส PIN ใหม่ต้องไม่ซ้ำกับรหัสเดิม")
+
+    if newPin == "123456":
+        raise HTTPException(status_code=400, detail="ไม่อนุญาตให้ใช้รหัส 123456 กรุณาตั้งรหัสที่มีความปลอดภัย")
+
+    if len(idCard) >= 6 and newPin == idCard[-6:]:
+        raise HTTPException(status_code=400, detail="ไม่อนุญาตให้ใช้เลข 6 ตัวท้ายของบัตรประชาชน")
+
+    new_hash = get_pin_hash(newPin)
+    teacher.pin_hash = new_hash
+    success = db.update_pin(idCard, new_hash)
+    if not success:
+        raise HTTPException(status_code=500, detail="ไม่สามารถบันทึกข้อมูลลง Google Sheet ได้")
+
+    return {
+        "status": "success",
+        "message": "เปลี่ยนรหัส PIN สำเร็จเรียบร้อยแล้ว กรุณาเข้าสู่ระบบด้วยรหัสใหม่"
+    }
 
 class VerifyTokenRequest(BaseModel):
     token: str

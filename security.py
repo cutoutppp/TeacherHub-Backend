@@ -98,3 +98,42 @@ async def require_admin(request: Request, user: dict | None = Depends(get_curren
         return user
 
     return user
+
+async def require_strict_admin(request: Request) -> dict:
+    """Unconditional admin check for high-risk operations (e.g. reset_pin), regardless of AUTH_MODE."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = auth_header.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user = payload.get("user")
+        if not user:
+            user = {
+                "userid": payload.get("sub"),
+                "is_admin": payload.get("is_admin", False),
+                "teaccode": payload.get("teaccode", "")
+            }
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    is_admin = False
+    if user:
+        is_admin_flag = user.get("is_admin", False)
+        teaccode = str(user.get("teaccode", "")).strip()
+        if is_admin_flag is True or teaccode in ADMIN_TEACCODES:
+            is_admin = True
+
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    return user
+

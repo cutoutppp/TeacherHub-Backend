@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from auth_db import get_db, Teacher
+from auth_db import get_db, Teacher, create_temp_pin
+from security import require_strict_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -94,16 +95,25 @@ def create_teacher(teacher_data: TeacherCreate, db = Depends(get_db)):
     return {"status": "success", "message": "เพิ่มครูใหม่สำเร็จ", "raw_pin": raw_pin}
 
 @router.post("/teachers/{teacher_id}/reset_pin")
-def reset_teacher_pin(teacher_id: int, db = Depends(get_db)):
+def reset_teacher_pin(
+    teacher_id: int,
+    admin: dict = Depends(require_strict_admin),
+    db = Depends(get_db)
+):
     teacher = db.get_teacher_by_id(teacher_id)
     if not teacher:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลครูท่านนี้")
         
-    raw_pin = str(teacher.userid)[-6:] if teacher.userid and len(str(teacher.userid)) >= 6 else "123456"
-    new_hash = get_pin_hash(raw_pin)
+    raw_pin, temp_hash = create_temp_pin(valid_hours=24)
+    teacher.pin_hash = temp_hash
     
-    success = db.update_pin(teacher.userid, new_hash)
+    success = db.update_pin(teacher.userid, temp_hash)
     if not success:
         raise HTTPException(status_code=500, detail="ไม่สามารถบันทึกข้อมูลลง Google Sheet ได้")
     
-    return {"status": "success", "message": "รีเซ็ตรหัสผ่านสำเร็จ", "new_pin": raw_pin}
+    return {
+        "status": "success",
+        "message": "รีเซ็ตรหัสผ่านสำเร็จ รหัส PIN ชั่วคราวมีอายุ 24 ชั่วโมง",
+        "temp_pin": raw_pin,
+        "expires_in_hours": 24
+    }
