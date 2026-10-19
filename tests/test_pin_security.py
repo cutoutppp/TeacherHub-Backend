@@ -227,3 +227,54 @@ def test_first_time_setup_strict_empty_pin(client_and_db):
     )
     assert resp.status_code == 200
     assert teacher3.pin_hash.startswith("$2b$") or teacher3.pin_hash.startswith("$2a$")
+
+
+# --- create_teacher / teacher list lockdown + guessable PIN (Claude review fix) ---
+
+def _admin_headers():
+    tok = create_access_token(data={"sub": "1100200654321", "user": {"userid": "1100200654321", "is_admin": True, "teaccode": "444"}})
+    return {"Authorization": f"Bearer {tok}"}
+
+def _teacher_headers():
+    tok = create_access_token(data={"sub": "1100100888999", "user": {"userid": "1100100888999", "is_admin": False, "teaccode": "101"}})
+    return {"Authorization": f"Bearer {tok}"}
+
+NEW_TEACHER = {"userid": "1100400111222", "teaccode": "999", "prefix": "ครู", "firstname": "ปลอม",
+               "lastname": "แอดมิน", "subjectgroup": "x", "is_admin": True}
+
+def test_create_teacher_requires_admin(client_and_db):
+    client, db = client_and_db
+    db.add_teacher = lambda t: (db.teachers.append(t) or True)
+    assert client.post("/api/admin/teachers", json=NEW_TEACHER).status_code == 401
+    assert client.post("/api/admin/teachers", json=NEW_TEACHER, headers=_teacher_headers()).status_code == 403
+    assert db.get_teacher_by_userid(NEW_TEACHER["userid"]) is None
+
+def test_create_teacher_gets_random_temp_pin(client_and_db):
+    client, db = client_and_db
+    db.add_teacher = lambda t: (db.teachers.append(t) or True)
+    resp = client.post("/api/admin/teachers", json=NEW_TEACHER, headers=_admin_headers())
+    assert resp.status_code == 200
+    raw = resp.json()["raw_pin"]
+    assert raw.isdigit() and len(raw) == 6 and raw != NEW_TEACHER["userid"][-6:]
+    assert db.get_teacher_by_userid(NEW_TEACHER["userid"]).pin_hash.startswith("TMP:")
+
+def test_teacher_list_requires_admin(client_and_db):
+    client, _ = client_and_db
+    assert client.get("/api/admin/teachers").status_code == 401
+    assert client.get("/api/admin/teachers", headers=_teacher_headers()).status_code == 403
+    assert client.get("/api/admin/teachers", headers=_admin_headers()).status_code == 200
+
+@pytest.mark.parametrize("weak", ["123456", "LAST6"])
+def test_login_with_guessable_pin_must_change(client_and_db, weak):
+    client, db = client_and_db
+    t = db.get_teacher_by_id(1)
+    pin = t.userid[-6:] if weak == "LAST6" else weak
+    t.pin_hash = get_pin_hash(pin)
+    resp = client.post("/api/auth/login", json={"idCard": t.userid, "pin": pin})
+    assert resp.status_code == 401 and resp.json()["detail"] == "MUST_CHANGE_PIN"
+    assert "access_token" not in resp.text
+
+def test_login_with_strong_pin_still_works(client_and_db):
+    client, db = client_and_db
+    resp = client.post("/api/auth/login", json={"idCard": "1100100888999", "pin": "998877"})
+    assert resp.status_code == 200 and "access_token" in resp.json()

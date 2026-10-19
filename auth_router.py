@@ -78,6 +78,13 @@ def login(request: LoginRequest, db = Depends(get_db)):
             detail="Incorrect username or password",
         )
 
+    # 4. PIN ที่เดาได้ (123456 / 6 ตัวท้ายเลขบัตร) — ต้องเปลี่ยนก่อนเข้าระบบ
+    if pin == "123456" or (len(idCard) >= 6 and pin == idCard[-6:]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="MUST_CHANGE_PIN"
+        )
+
     # Create token payload
     teacher_data = {
         "id": teacher.id,

@@ -50,7 +50,7 @@ def get_school_stats(db = Depends(get_db)):
     return stats
 
 @router.get("/teachers")
-def get_all_teachers(db = Depends(get_db)):
+def get_all_teachers(admin: dict = Depends(require_strict_admin), db = Depends(get_db)):
     teachers = db.get_all()
     return [{"id": t.id, "userid": t.userid, "teaccode": t.teaccode, "name": f"{t.prefix}{t.firstname} {t.lastname}", "subjectgroup": t.subjectgroup, "is_admin": t.is_admin} for t in teachers]
 
@@ -67,15 +67,18 @@ class TeacherCreate(BaseModel):
     is_admin: bool = False
 
 @router.post("/teachers")
-def create_teacher(teacher_data: TeacherCreate, db = Depends(get_db)):
+def create_teacher(
+    teacher_data: TeacherCreate,
+    admin: dict = Depends(require_strict_admin),
+    db = Depends(get_db)
+):
     # Check if userid already exists
     existing_user = db.get_teacher_by_userid(teacher_data.userid)
     if existing_user:
         raise HTTPException(status_code=400, detail="เลขบัตรประชาชนนี้มีในระบบแล้ว")
     
-    # Generate PIN: Last 6 digits of userid, or 123456
-    raw_pin = str(teacher_data.userid)[-6:] if teacher_data.userid and len(str(teacher_data.userid)) >= 6 else "123456"
-    pin_hash = get_pin_hash(raw_pin)
+    # PIN ชั่วคราวแบบสุ่ม (24 ชม.) — ครูต้องตั้ง PIN ใหม่ตอนล็อกอินครั้งแรก
+    raw_pin, pin_hash = create_temp_pin(valid_hours=24)
     
     new_teacher = Teacher(
         userid=teacher_data.userid,
@@ -92,7 +95,7 @@ def create_teacher(teacher_data: TeacherCreate, db = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=500, detail="ไม่สามารถบันทึกข้อมูลลง Google Sheet ได้")
     
-    return {"status": "success", "message": "เพิ่มครูใหม่สำเร็จ", "raw_pin": raw_pin}
+    return {"status": "success", "message": "เพิ่มครูใหม่สำเร็จ รหัส PIN ชั่วคราวมีอายุ 24 ชั่วโมง", "raw_pin": raw_pin, "expires_in_hours": 24}
 
 @router.post("/teachers/{teacher_id}/reset_pin")
 def reset_teacher_pin(
