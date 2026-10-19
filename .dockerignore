@@ -5,3 +5,16 @@ __pycache__/
 *.zip
 test_output_*.docx
 dump.txt
+
+# Local databases and confidential school sheets
+auth.db
+*.xlsx
+*.xls
+*.csv
+_scratch/
+scratch_*
+fix_*
+patch_*
+zip_*
+*.har
+.env*
